@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bhoomi Bytes</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+</head>
+<body>
+
+    <div class="app-container">
+        
+        <!-- LOGIN VIEW -->
+        <main id="login-view" class="view active">
+            <div class="login-container card-panel">
+                <div class="login-header">
+                    <i class="fa-solid fa-leaf" style="font-size: 3rem; color: var(--primary);"></i>
+                    <h1 data-i18n="app_title">Bhoomi Bytes</h1>
+                    <p class="subtitle" data-i18n="login_subtitle">Smart Farm Monitoring System</p>
+                </div>
+                
+                <div class="login-tabs">
+                    <button class="tab-btn active" id="emailTabBtn" data-tab="email-tab" data-i18n="btn_email_login">Email Login</button>
+                    <button class="tab-btn" id="guestTabBtn" data-tab="guest-tab" data-i18n="btn_guest_access">Guest Access</button>
+                </div>
+                
+                <!-- Email Login Tab -->
+                <div id="email-tab" class="login-tab active">
+                    <div class="provider-login">
+                        <button type="button" class="provider-btn" id="googleLoginBtn">
+                            <i class="fa-brands fa-google"></i>
+                            <span data-i18n="btn_google_login">Continue with Google</span>
+                        </button>
+                        <button type="button" class="provider-btn" id="microsoftLoginBtn">
+                            <i class="fa-brands fa-microsoft"></i>
+                            <span data-i18n="btn_microsoft_login">Continue with Microsoft</span>
+                        </button>
+                    </div>
+
+                    <div class="auth-divider"><span data-i18n="login_email_divider">or use email</span></div>
+                    <p class="session-note" data-i18n="session_timeout_note">For security, inactive users are logged out after 10 minutes.</p>
+
+                    <form id="loginForm" class="login-form">
+                        <div class="form-group">
+                            <label data-i18n="label_email">Email</label>
+                            <div class="input-wrapper">
+                                <i class="fa-solid fa-envelope"></i>
+                                <input type="email" id="loginEmail" required placeholder="Enter email" data-i18n="login_email_placeholder">
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label data-i18n="label_password">Password</label>
+                            <div class="input-wrapper">
+                                <i class="fa-solid fa-lock"></i>
+                                <input type="password" id="loginPassword" required placeholder="Enter password" data-i18n="login_password_placeholder">
+                            </div>
+                        </div>
+                        
+                        <button type="submit" class="btn-primary btn-block">
+                            <i class="fa-solid fa-sign-in-alt"></i> <span data-i18n="btn_sign_in">Sign In</span>
+                        </button>
+                        
+                        <div class="toggle-form">
+                            <p><span data-i18n="toggle_signup_prefix">No account?</span> <a href="#" id="toggleSignUp" data-i18n="toggle_signup_action">Create one</a></p>
+                        </div>
+                    </form>
+                    
+                    <form id="signupForm" class="login-form" style="display: none;">
+                        <div class="auth-note">
+                            <span data-i18n="signup_provider_note">Create your farm account with email, or use Google/Microsoft above for faster access.</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label data-i18n="label_name">Full Name</label>
+                            <div class="input-wrapper">
+                                <i class="fa-solid fa-user"></i>
+                                <input type="text" id="signupName" required placeholder="Enter name" data-i18n="signup_name_placeholder">
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label data-i18n="label_email">Email</label>
+                            <div class="input-wrapper">
+                                <i class="fa-solid fa-envelope"></i>
+                                <input type="email" id="signupEmail" required placeholder="Enter email" data-i18n="login_email_placeholder">
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label data-i18n="label_password">Password</label>
+                            <div class="input-wrapper">
+                                <i class="fa-solid fa-lock"></i>
+                                <input type="password" id="signupPassword" required placeholder="Min 6 characters" data-i18n="signup_password_placeholder">
+                            </div>
+                        </div>
+                        
+                        <button type="submit" class="btn-primary btn-block">
+                            <i class="fa-solid fa-user-plus"></i> <span data-i18n="btn_sign_up">Create Account</span>
+                        </button>
+                        
+                        <div class="toggle-form">
+                            <p><span data-i18n="toggle_login_prefix">Already have account?</span> <a href="#" id="toggleLogin" data-i18n="toggle_login_action">Sign in</a></p>
+                        </div>
+                    </form>
+                </div>
+        
+                <div id="guest-tab" class="login-tab">
+                    <div class="guest-info">
+                        <i class="fa-solid fa-user-secret" style="font-size: 2rem; color: var(--secondary); margin-bottom: 1rem;"></i>
+                        <h3 data-i18n="btn_guest_access">Guest Access</h3>
+                        <p data-i18n="guest_access_desc">Use the app without creating an account. Limited features available.</p>
+                        <button id="guestLoginBtn" class="btn-primary btn-block" style="margin-top: 1.5rem;">
+                            <i class="fa-solid fa-arrow-right"></i> <span data-i18n="btn_continue_guest">Continue as Guest</span>
+                        </button>
+                        <p class="auth-status" id="guestAuthStatus"></p>
+                    </div>
+                </div>
+                <p class="auth-status" id="authStatus"></p>
+            </div>
+        </main>
+        
+        <!-- HEADER -->
+        <header class="app-header" id="mainHeader" style="display: none;">
+            <div class="logo">
+                <i class="fa-solid fa-leaf"></i>
+                <h1 data-i18n="app_title">Bhoomi Bytes</h1>
+            </div>
+            
+            <div class="header-controls">
+                <div class="lang-selector">
+                    <i class="fa-solid fa-earth-asia"></i>
+                    <select id="languageSelect">
+                        <option value="en">English</option>
+                        <option value="hi">हिंदी (Hindi)</option>
+                        <option value="bn">বাংলা (Bengali)</option>
+                        <option value="te">తెలుగు (Telugu)</option>
+                        <option value="mr">मराठी (Marathi)</option>
+                        <option value="ta">தமிழ் (Tamil)</option>
+                        <option value="gu">ગુજરાતી (Gujarati)</option>
+                        <option value="ur">اردو (Urdu)</option>
+                        <option value="pa">ਪੰਜਾਬੀ (Punjabi)</option>
+                        <option value="as">অসমীয়া (Assamese)</option>
+                    </select>
+                </div>
+                <div class="time-display" id="clockDisplay">00:00:00</div>
+                <button class="icon-btn" id="logoutBtn" title="Logout" style="display:none;">
+                    <i class="fa-solid fa-sign-out-alt"></i>
+                </button>
+                <button class="icon-btn" id="resetAppBtn" title="Reset App" style="display:none;">
+                    <i class="fa-solid fa-rotate-right"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- ONBOARDING VIEW -->
+        <main id="onboarding-view" class="view active">
+            <div class="onboarding-container card-panel">
+                <h2 data-i18n="onboarding_title">System Initialization</h2>
+                <p class="subtitle" data-i18n="onboarding_subtitle">Configure AI parameters for your sector</p>
+
+                <form id="onboardingForm" class="onboarding-form">
+                    <div class="form-group">
+                        <label data-i18n="label_name">Farmer Name</label>
+                        <div class="input-wrapper">
+                            <i class="fa-solid fa-face-smile"></i>
+                            <input type="text" id="opName" required placeholder="Enter name">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label data-i18n="label_field_size">Field Size</label>
+                            <div class="input-wrapper">
+                                <i class="fa-solid fa-vector-square"></i>
+                                <input type="number" id="fieldSize" required min="0.1" step="0.1" placeholder="0.0">
+                            </div>
+                        </div>
+                        <div class="form-group half">
+                            <label data-i18n="label_unit">Unit</label>
+                            <div class="input-wrapper">
+                                <select id="fieldUnit">
+                                    <option value="bigha" data-i18n="unit_bigha">Bigha</option>
+                                    <option value="katha" data-i18n="unit_katha">Katha</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label data-i18n="label_crop_type">Target Crop</label>
+                        <div class="input-wrapper">
+                            <i class="fa-solid fa-seedling"></i>
+                            <select id="cropType" required>
+                                <option value="rice" data-i18n="crop_rice">Rice</option>
+                                <option value="paddy" data-i18n="crop_paddy">Paddy</option>
+                                <option value="potato" data-i18n="crop_potato">Potato</option>
+                                <option value="vegetables" data-i18n="crop_vegetables">Vegetables</option>
+                                <option value="gehunu" data-i18n="crop_gehunu">Gehunu (Wheat)</option>
+                                <option value="tea" data-i18n="crop_tea">Tea</option>
+                                <option value="other" data-i18n="crop_other">Other</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-primary mt-4">
+                        <span data-i18n="btn_initialize">Start Farming</span>
+                        <i class="fa-solid fa-heart"></i>
+                    </button>
+                </form>
+            </div>
+        </main>
+
+        <!-- DASHBOARD VIEW -->
+        <main id="dashboard-view" class="view">
+            
+            <div class="dashboard-grid">
+                
+                <!-- Profile / Status Summary -->
+                <div class="card-panel profile-panel">
+                    <div class="panel-header">
+                        <h3 data-i18n="panel_system_status">System Status</h3>
+                        <div class="status-indicator online">
+                            <span class="pulse"></span> <span data-i18n="status_online">System Online</span>
+                        </div>
+                    </div>
+                    <div class="profile-info">
+                        <div class="info-item">
+                            <span class="label" data-i18n="info_operator">Farmer:</span>
+                            <span class="value" id="dispName" style="color:var(--primary)"></span>
+                        </div>
+                        <div class="info-item">
+                            <span class="label" data-i18n="info_sector">Land Size:</span>
+                            <span class="value" id="dispSize" style="color:var(--accent-blue)"></span>
+                        </div>
+                        <div class="info-item">
+                            <span class="label" data-i18n="info_crop">Growing:</span>
+                            <span class="value" id="dispCrop" style="color:var(--secondary)"></span>
+                        </div>
+                        <div class="info-item">
+                            <span class="label" data-i18n="info_water_used">Water Used:</span>
+                            <span class="value" style="color:var(--accent-blue)"><span id="dispWater">--</span> L</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="label" data-i18n="info_energy_used">Energy Used:</span>
+                            <span class="value" style="color:var(--warning)"><span id="dispEnergy">--</span> kWh</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Weather Panel (Extended with Forecast) -->
+                <div class="card-panel weather-panel grid-span-2">
+                    <div class="panel-header">
+                        <h3 data-i18n="panel_weather">Weather Station</h3>
+                        <i class="fa-solid fa-sun" style="font-size:1.5rem; color:#fff;"></i>
+                    </div>
+                    
+                    <div class="weather-main">
+                        <i class="fa-solid fa-cloud-sun weather-icon-main" id="wMainIcon"></i>
+                        <div class="w-temp-box">
+                            <div class="w-temp"><span id="wTemp">--</span>°C</div>
+                            <div class="w-desc" id="wDesc">Loading...</div>
+                            <div style="font-size: 0.85rem; font-weight: 700; opacity: 0.8; margin-top: 5px;">
+                                <i class="fa-solid fa-location-dot"></i> <span id="wLocation">Fetching location...</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="weather-details">
+                        <div class="w-detail">
+                            <i class="fa-solid fa-droplet"></i>
+                            <span><span id="wRain">0</span>mm Rain</span>
+                        </div>
+                        <div class="w-detail">
+                            <i class="fa-solid fa-wind"></i>
+                            <span><span id="wWind">0</span> km/h</span>
+                        </div>
+                        <div class="w-detail">
+                            <i class="fa-solid fa-temperature-half"></i>
+                            <span><span id="wHumid">0</span>% Hum</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 7 Day Forecast -->
+                    <h4 style="margin-top: 1.5rem; color: #03045e;">Upcoming Forecast</h4>
+                    <div class="forecast-container" id="forecastContainer">
+                        <!-- Populated by JS -->
+                        <div class="forecast-day"><span>Loading...</span></div>
+                    </div>
+                </div>
+
+                <!-- AI Recommendations -->
+                <div class="card-panel ai-panel">
+                    <div class="panel-header">
+                        <h3 data-i18n="panel_ai_analysis">Smart Analysis</h3>
+                    </div>
+                    <div class="ai-grid" style="grid-template-columns: 1fr; gap: 0.8rem;">
+                        <div class="ai-card">
+                            <div class="ai-icon water"><i class="fa-solid fa-glass-water"></i></div>
+                            <div class="ai-text">
+                                <h4 data-i18n="ai_water_demand">Water Need</h4>
+                                <p id="aiWaterVal">--</p>
+                            </div>
+                        </div>
+                        <div class="ai-card">
+                            <div class="ai-icon health"><i class="fa-solid fa-seedling"></i></div>
+                            <div class="ai-text">
+                                <h4 data-i18n="ai_crop_health">Crop Health</h4>
+                                <p id="aiHealthVal">--</p>
+                            </div>
+                        </div>
+                        <div class="ai-card">
+                            <div class="ai-icon soil"><i class="fa-solid fa-mound"></i></div>
+                            <div class="ai-text">
+                                <h4 data-i18n="ai_soil_status">Soil Status</h4>
+                                <p id="aiSoilVal">--</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="ai-recommendation mt-3 p-3">
+                        <h4 data-i18n="ai_action_req">Tip of the Day:</h4>
+                        <p id="aiRecText" data-i18n="ai_rec_normal">Keep smiling! Your farm is looking great today.</p>
+                    </div>
+                </div>
+
+                <!-- Sensors Grid -->
+                <div class="grid-span-full">
+                    <h3 class="section-title"><i class="fa-solid fa-leaf"></i> <span>Live Field Sensors</span></h3>
+                    <div class="sensor-cards">
+                        
+                        <!-- Soil Moisture -->
+                        <div class="sensor-card" id="cardMoisture">
+                            <div class="sensor-header">
+                                <span data-i18n="sensor_moisture">Soil Moisture</span>
+                                <i class="fa-solid fa-water"></i>
+                            </div>
+                            <div class="sensor-value">
+                                <span id="valMoisture">--</span><span class="unit">%</span>
+                            </div>
+                            <div class="sensor-status">
+                                <span class="trend stable"><i class="fa-solid fa-minus"></i></span>
+                                <span class="interp" id="interpMoisture">Normal</span>
+                            </div>
+                            <div class="chart-container mini"><canvas id="chartMoisture"></canvas></div>
+                        </div>
+
+                        <!-- Temperature -->
+                        <div class="sensor-card" id="cardTemp">
+                            <div class="sensor-header">
+                                <span data-i18n="sensor_temp">Soil Temp</span>
+                                <i class="fa-solid fa-temperature-high"></i>
+                            </div>
+                            <div class="sensor-value">
+                                <span id="valTemp">--</span><span class="unit">°C</span>
+                            </div>
+                            <div class="sensor-status">
+                                <span class="trend stable"><i class="fa-solid fa-minus"></i></span>
+                                <span class="interp" id="interpTemp">Normal</span>
+                            </div>
+                            <div class="chart-container mini"><canvas id="chartTemp"></canvas></div>
+                        </div>
+
+                        <!-- Humidity -->
+                        <div class="sensor-card" id="cardHumidity">
+                            <div class="sensor-header">
+                                <span data-i18n="sensor_humidity">Air Humidity</span>
+                                <i class="fa-solid fa-cloud"></i>
+                            </div>
+                            <div class="sensor-value">
+                                <span id="valHumidity">--</span><span class="unit">%</span>
+                            </div>
+                            <div class="sensor-status">
+                                <span class="trend stable"><i class="fa-solid fa-minus"></i></span>
+                                <span class="interp" id="interpHumidity">Normal</span>
+                            </div>
+                            <div class="chart-container mini"><canvas id="chartHumidity"></canvas></div>
+                        </div>
+
+                        <!-- pH Level -->
+                        <div class="sensor-card" id="cardPh">
+                            <div class="sensor-header">
+                                <span data-i18n="sensor_ph">pH Level</span>
+                                <i class="fa-solid fa-flask"></i>
+                            </div>
+                            <div class="sensor-value">
+                                <span id="valPh">--</span><span class="unit"></span>
+                            </div>
+                            <div class="sensor-status">
+                                <span class="trend stable"><i class="fa-solid fa-minus"></i></span>
+                                <span class="interp" id="interpPh">Optimal</span>
+                            </div>
+                            <div class="chart-container mini"><canvas id="chartPh"></canvas></div>
+                        </div>
+
+                        <!-- TDS -->
+                        <div class="sensor-card" id="cardTds">
+                            <div class="sensor-header">
+                                <span data-i18n="sensor_tds">Nutrients</span>
+                                <i class="fa-solid fa-seedling"></i>
+                            </div>
+                            <div class="sensor-value">
+                                <span id="valTds">--</span><span class="unit">ppm</span>
+                            </div>
+                            <div class="sensor-status">
+                                <span class="trend stable"><i class="fa-solid fa-minus"></i></span>
+                                <span class="interp" id="interpTds">Normal</span>
+                            </div>
+                            <div class="chart-container mini"><canvas id="chartTds"></canvas></div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- Crop Settings -->
+                <div class="card-panel crop-settings-panel grid-span-full">
+                    <div class="panel-header">
+                        <h3><i class="fa-solid fa-sliders"></i> Crop Default Values</h3>
+                        <button type="button" class="btn-secondary compact-btn" id="resetCropDefaultsBtn">
+                            <i class="fa-solid fa-rotate-left"></i> Reset Defaults
+                        </button>
+                    </div>
+
+                    <form id="cropSettingsForm" class="crop-settings-form">
+                        <label>
+                            <span>Moisture Low %</span>
+                            <input type="number" id="cropMoistureLow" min="0" max="100" step="1">
+                        </label>
+                        <label>
+                            <span>Moisture High %</span>
+                            <input type="number" id="cropMoistureHigh" min="0" max="100" step="1">
+                        </label>
+                        <label>
+                            <span>Temp Low C</span>
+                            <input type="number" id="cropTempLow" min="-20" max="80" step="0.1">
+                        </label>
+                        <label>
+                            <span>Temp High C</span>
+                            <input type="number" id="cropTempHigh" min="-20" max="80" step="0.1">
+                        </label>
+                        <label>
+                            <span>pH Low</span>
+                            <input type="number" id="cropPhLow" min="0" max="14" step="0.1">
+                        </label>
+                        <label>
+                            <span>pH High</span>
+                            <input type="number" id="cropPhHigh" min="0" max="14" step="0.1">
+                        </label>
+                        <label>
+                            <span>TDS Low ppm</span>
+                            <input type="number" id="cropTdsLow" min="0" max="3000" step="1">
+                        </label>
+                        <label>
+                            <span>TDS High ppm</span>
+                            <input type="number" id="cropTdsHigh" min="0" max="3000" step="1">
+                        </label>
+                        <label>
+                            <span>Start Pump Below %</span>
+                            <input type="number" id="cropCriticalMoisture" min="0" max="100" step="1">
+                        </label>
+                        <label>
+                            <span>Stop Pump Above %</span>
+                            <input type="number" id="cropStopMoisture" min="0" max="100" step="1">
+                        </label>
+                        <button type="submit" class="btn-primary settings-submit">
+                            <i class="fa-solid fa-floppy-disk"></i> Save Values
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Pump Control Panel -->
+                <div class="card-panel pump-panel grid-span-full">
+                    <div class="panel-header">
+                        <h3 data-i18n="panel_pump_control">Irrigation Pump Control</h3>
+                        <div class="pump-status-badge offline" id="pumpBadge">
+                            <i class="fa-solid fa-power-off"></i> <span id="pumpStateText" data-i18n="pump_off">PUMP OFF</span>
+                        </div>
+                    </div>
+                    
+                    <div class="pump-control-area">
+                        <div class="pump-visualizer">
+                            <div class="pump-circle" id="pumpCircle">
+                                <div class="water-level"></div>
+                                <i class="fa-solid fa-faucet-drip"></i>
+                            </div>
+                            <div class="connection-flow" id="connFlow">
+                                <div class="flow-dot"></div><div class="flow-dot"></div><div class="flow-dot"></div>
+                            </div>
+                            <div class="esp-node">
+                                <i class="fa-solid fa-microchip"></i>
+                                <span data-i18n="label_esp32_relay">Controller Node</span>
+                            </div>
+                        </div>
+                        
+                        <div class="pump-actions">
+                            <div class="farm-summary">
+                                <div class="summary-tile water">
+                                    <i class="fa-solid fa-droplet"></i>
+                                    <span>Water Used</span>
+                                    <strong><span id="pumpWaterUsed">--</span> L</strong>
+                                </div>
+                                <div class="summary-tile energy">
+                                    <i class="fa-solid fa-bolt"></i>
+                                    <span>Energy Used</span>
+                                    <strong><span id="pumpEnergyUsed">--</span> kWh</strong>
+                                </div>
+                            </div>
+
+                            <div class="farm-alerts" id="farmAlerts">
+                                <div class="farm-alert info">
+                                    <i class="fa-solid fa-circle-check"></i>
+                                    <span>Farm monitor is ready. Sensor readings will appear automatically.</span>
+                                </div>
+                            </div>
+                            
+                            <div class="action-buttons">
+                                <button class="btn-pump btn-start" id="btnStartPump">
+                                    <i class="fa-solid fa-play"></i> <span data-i18n="btn_start_pump">START PUMP</span>
+                                </button>
+                                <button class="btn-pump btn-stop" id="btnStopPump" disabled>
+                                    <i class="fa-solid fa-stop"></i> <span data-i18n="btn_stop_pump">STOP PUMP</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="confirmModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <i class="fa-solid fa-circle-question"></i>
+                <h3 data-i18n="modal_confirm_title">Confirm Action</h3>
+            </div>
+            <div class="modal-body">
+                <p id="confirmText">Are you sure you want to execute this command?</p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-secondary" id="btnCancelCmd" data-i18n="btn_cancel">Cancel</button>
+                <button class="btn-primary btn-danger" style="box-shadow: none;" id="btnConfirmCmd" data-i18n="btn_execute">Execute</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/i18n.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1154 @@
+// ==========================================
+// FIREBASE CONFIGURATION
+// ==========================================
+// ADD YOUR FIREBASE CONFIG HERE
+const firebaseConfig = {
+    apiKey: "AIzaSyDWThEN0weYvtQ_k7qQqvF1X8HbBhuUpAE",
+    authDomain: "bhumibytes.firebaseapp.com",
+    databaseURL: "https://bhumibytes-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "bhumibytes",
+    storageBucket: "bhumibytes.firebasestorage.app",
+    messagingSenderId: "986382416103",
+    appId: "1:986382416103:web:cff8fe7472b5cac68f0a42"
+};
+
+// Initialize Firebase
+let db, auth;
+if (typeof firebase !== 'undefined') {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+    auth = firebase.auth();
+}
+
+const sensorConfigs = appConfig.sensors;
+const sensorConfigByKey = sensorConfigs.reduce((configs, sensor) => {
+    configs[sensor.key] = sensor;
+    return configs;
+}, {});
+
+function toPascalCase(value) {
+    return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function createDefaultSensors() {
+    return sensorConfigs.reduce((state, sensor) => {
+        state[sensor.key] = { val: null, trend: 'stable', history: [] };
+        return state;
+    }, {});
+}
+
+function getSensorIdealRange(sensorName, crop) {
+    const config = sensorConfigByKey[sensorName];
+    if (!config) return null;
+    return config.idealRange || crop[config.idealRangeKey] || [0, 0];
+}
+
+function getCurrentCropConfig() {
+    const defaultCrop = appConfig.crops[appState.crop] || appConfig.crops.other;
+    const override = appState.cropOverrides && appState.crop ? appState.cropOverrides[appState.crop] : null;
+    return {
+        ...defaultCrop,
+        ...(override || {}),
+        irrigationRules: {
+            ...defaultCrop.irrigationRules,
+            ...((override && override.irrigationRules) || {})
+        }
+    };
+}
+
+// ==========================================
+// FIREBASE AUTHENTICATION
+// ==========================================
+
+// Email/Password Login
+function emailLogin(email, password) {
+    if (!auth) {
+        alert('Firebase Auth not initialized');
+        return;
+    }
+    markLoginRequested();
+    setAuthStatus('Signing in with email...');
+    auth.signInWithEmailAndPassword(email.trim(), password)
+        .catch((error) => {
+            clearAuthSession();
+            setAuthStatus(`Login failed: ${error.message}`, 'error');
+            alert('Login failed: ' + error.message);
+        });
+}
+
+// Email/Password Signup
+function emailSignup(name, email, password) {
+    if (!auth) {
+        alert('Firebase Auth not initialized');
+        return;
+    }
+    const displayName = name.trim();
+    pendingDisplayName = displayName;
+    markLoginRequested();
+    setAuthStatus('Creating your account...');
+    auth.createUserWithEmailAndPassword(email.trim(), password)
+        .then((userCredential) => {
+            return userCredential.user.updateProfile({ displayName });
+        })
+        .then(() => {
+            if (auth.currentUser && appState.userId === auth.currentUser.uid) {
+                appState.user = displayName;
+                saveAppState();
+            }
+            pendingDisplayName = null;
+        })
+        .catch((error) => {
+            clearAuthSession();
+            pendingDisplayName = null;
+            setAuthStatus(`Signup failed: ${error.message}`, 'error');
+            alert('Signup failed: ' + error.message);
+        });
+}
+
+// Guest Login (Anonymous)
+function guestLogin() {
+    if (!auth) {
+        alert('Firebase Auth not initialized');
+        return;
+    }
+
+    setGuestLoginLoading(true);
+    markLoginRequested();
+    auth.signInAnonymously()
+        .catch((error) => {
+            clearAuthSession();
+            setGuestLoginLoading(false);
+            alert('Guest login failed: ' + error.message);
+        });
+}
+
+function providerLogin(providerName) {
+    if (!auth || typeof firebase === 'undefined') {
+        alert('Firebase Auth not initialized');
+        return;
+    }
+
+    const provider = providerName === 'google'
+        ? new firebase.auth.GoogleAuthProvider()
+        : new firebase.auth.OAuthProvider('microsoft.com');
+
+    setAuthStatus(`Connecting with ${providerName === 'google' ? 'Google' : 'Microsoft'}...`);
+    setProviderButtonsLoading(true);
+    markLoginRequested();
+
+    auth.signInWithPopup(provider)
+        .catch((error) => {
+            clearAuthSession();
+            setAuthStatus(`Login failed: ${error.message}`, 'error');
+            alert('Login failed: ' + error.message);
+        })
+        .finally(() => {
+            setProviderButtonsLoading(false);
+        });
+}
+
+// Logout
+function logout(options = {}) {
+    if (!auth) return;
+    clearAuthSession();
+    auth.signOut().then(() => {
+        appState = createDefaultAppState();
+        if (options.reason === 'timeout') {
+            alert('You were logged out automatically after 10 minutes.');
+        }
+        location.reload();
+    });
+}
+
+// ==========================================
+
+// Read sensor data from Firebase
+function readFirebaseSensor(sensorName) {
+    if (!db) return;
+    const sensorConfig = sensorConfigByKey[sensorName];
+    if (!sensorConfig) return;
+
+    db.ref(sensorConfig.firebasePath).on('value', (snapshot) => {
+        const val = snapshot.val();
+        const crop = getCurrentCropConfig();
+        const idealRange = getSensorIdealRange(sensorName, crop);
+
+        if (val === null || val === undefined || val === '') {
+            resetSensorUI(sensorName);
+            runAILogic(crop);
+            return;
+        }
+
+        const numericVal = Number(val);
+        if (Number.isNaN(numericVal)) {
+            resetSensorUI(sensorName);
+            runAILogic(crop);
+            return;
+        }
+
+        sensors[sensorName].val = numericVal;
+        updateSensorUI(sensorName, numericVal, idealRange, sensorConfig.decimals);
+        runAILogic(crop);
+    });
+}
+
+// Write pump command to Firebase
+function sendPumpCommand(action) {
+    if (!db) {
+        console.error('Firebase not initialized');
+        return;
+    }
+    db.ref('pump/command').set(action).then(() => {
+        showFarmAlert(`Pump ${action === 'start' ? 'start' : 'stop'} request sent.`, 'success', 'fa-circle-check');
+    }).catch((err) => {
+        showFarmAlert(`Pump command failed: ${err.message}`, 'danger', 'fa-circle-exclamation');
+    });
+}
+
+// Listen to pump status from Firebase
+function listenPumpStatus() {
+    if (!db) return;
+    db.ref('pump/status').on('value', (snapshot) => {
+        const status = snapshot.val();
+        if (status === 'on') {
+            appState.pumpActive = true;
+        } else if (status === 'off') {
+            appState.pumpActive = false;
+        }
+        updatePumpUI(status);
+    });
+}
+
+function listenFarmUsage() {
+    if (!db) return;
+
+    db.ref('usage/waterUsed').on('value', (snapshot) => {
+        const value = Number(snapshot.val());
+        appState.waterUsed = Number.isNaN(value) ? null : value;
+        updateUsageSummary();
+    });
+
+    db.ref('usage/energyUsed').on('value', (snapshot) => {
+        const value = Number(snapshot.val());
+        appState.energyUsed = Number.isNaN(value) ? null : value;
+        updateUsageSummary();
+    });
+}
+
+// APP STATE
+// ==========================================
+// App State
+const APP_STATE_PREFIX = 'nexus_agri_state';
+const LOGIN_REQUESTED_KEY = 'nexus_login_requested';
+const AUTH_EXPIRES_AT_KEY = 'nexus_auth_expires_at';
+const AUTH_SESSION_MS = 10 * 60 * 1000;
+
+let autoLogoutTimer = null;
+
+function createDefaultAppState() {
+    return {
+        user: null,
+        fieldSize: null,
+        unit: null,
+        crop: null,
+        lang: 'en',
+        pumpActive: false,
+        waterUsed: null,
+        energyUsed: null,
+        userId: null,
+        isGuest: false,
+        cropOverrides: {}
+    };
+}
+
+function getAppStateKey(userId = appState.userId) {
+    return userId ? `${APP_STATE_PREFIX}_${userId}` : APP_STATE_PREFIX;
+}
+
+function markLoginRequested() {
+    sessionStorage.setItem(LOGIN_REQUESTED_KEY, 'true');
+    refreshAuthSession();
+}
+
+function refreshAuthSession() {
+    sessionStorage.setItem(AUTH_EXPIRES_AT_KEY, String(Date.now() + AUTH_SESSION_MS));
+}
+
+function clearAuthSession() {
+    sessionStorage.removeItem(LOGIN_REQUESTED_KEY);
+    sessionStorage.removeItem(AUTH_EXPIRES_AT_KEY);
+    stopAutoLogoutTimer();
+}
+
+function hasActiveAuthSession() {
+    const expiresAt = Number(sessionStorage.getItem(AUTH_EXPIRES_AT_KEY));
+    return Number.isFinite(expiresAt) && expiresAt > Date.now();
+}
+
+function stopAutoLogoutTimer() {
+    if (autoLogoutTimer) {
+        clearTimeout(autoLogoutTimer);
+        autoLogoutTimer = null;
+    }
+}
+
+function startAutoLogoutTimer() {
+    stopAutoLogoutTimer();
+    refreshAuthSession();
+    autoLogoutTimer = setTimeout(() => {
+        showFarmAlert('Session expired after 10 minutes. Logging out for safety.', 'warn', 'fa-clock');
+        logout({ reason: 'timeout' });
+    }, AUTH_SESSION_MS);
+}
+
+function handleUserActivity() {
+    if (!auth || !auth.currentUser) return;
+    startAutoLogoutTimer();
+}
+
+['click', 'keydown', 'mousemove', 'touchstart'].forEach((eventName) => {
+    document.addEventListener(eventName, handleUserActivity, { passive: true });
+});
+
+function loadAppStateForUser(user) {
+    const saved = localStorage.getItem(getAppStateKey(user.uid));
+    if (!saved) return createDefaultAppState();
+
+    try {
+        return { ...createDefaultAppState(), ...JSON.parse(saved) };
+    } catch (error) {
+        console.warn('Saved app state is invalid. Starting fresh.', error);
+        return createDefaultAppState();
+    }
+}
+
+function saveAppState() {
+    if (!appState.userId) return;
+    localStorage.setItem(getAppStateKey(), JSON.stringify(appState));
+}
+
+let appState = createDefaultAppState();
+
+// Sensor State
+let sensors = createDefaultSensors();
+let sensorStatusKeys = {};
+let currentAiRecKey = 'ai_rec_normal';
+
+let charts = {};
+let chartsInitialized = false;
+let dashboardTimer = null;
+let weatherIntervalId = null;
+let firebaseListenersStarted = false;
+let pendingDisplayName = null;
+let currentWeatherState = {
+    temp: null,
+    rain: null,
+    wind: null,
+    humid: null,
+    desc: null,
+    code: null
+};
+
+// DOM Elements
+const loginView = document.getElementById('login-view');
+const mainHeader = document.getElementById('mainHeader');
+const onboardingView = document.getElementById('onboarding-view');
+const dashboardView = document.getElementById('dashboard-view');
+const onboardingForm = document.getElementById('onboardingForm');
+const langSelect = document.getElementById('languageSelect');
+const resetBtn = document.getElementById('resetAppBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+
+// Login Form Elements
+const emailTabBtn = document.getElementById('emailTabBtn');
+const guestTabBtn = document.getElementById('guestTabBtn');
+const loginForm = document.getElementById('loginForm');
+const signupForm = document.getElementById('signupForm');
+const guestLoginBtn = document.getElementById('guestLoginBtn');
+const guestAuthStatus = document.getElementById('guestAuthStatus');
+const authStatus = document.getElementById('authStatus');
+const googleLoginBtn = document.getElementById('googleLoginBtn');
+const microsoftLoginBtn = document.getElementById('microsoftLoginBtn');
+const toggleSignUp = document.getElementById('toggleSignUp');
+const toggleLogin = document.getElementById('toggleLogin');
+const cropSettingsForm = document.getElementById('cropSettingsForm');
+const resetCropDefaultsBtn = document.getElementById('resetCropDefaultsBtn');
+
+function renderLanguageOptions() {
+    if (!langSelect) return;
+
+    langSelect.innerHTML = '';
+    appConfig.languages.forEach((language) => {
+        const option = document.createElement('option');
+        option.value = language.code;
+        option.textContent = language.label;
+        langSelect.appendChild(option);
+    });
+}
+
+function renderSensorCards() {
+    const sensorCards = document.querySelector('.sensor-cards');
+    if (!sensorCards) return;
+
+    sensorCards.innerHTML = '';
+    sensorConfigs.forEach((sensor) => {
+        const sensorName = toPascalCase(sensor.key);
+        const card = document.createElement('div');
+        card.className = 'sensor-card';
+        card.id = `card${sensorName}`;
+        card.innerHTML = `
+            <div class="sensor-header">
+                <span data-i18n="${sensor.labelKey}">${sensor.fallbackLabel}</span>
+                <i class="fa-solid ${sensor.icon}"></i>
+            </div>
+            <div class="sensor-value">
+                <span id="val${sensorName}">--</span><span class="unit">${sensor.unit}</span>
+            </div>
+            <div class="sensor-status">
+                <span class="trend stable"><i class="fa-solid fa-minus"></i></span>
+                <span class="interp" id="interp${sensorName}">Normal</span>
+            </div>
+            <div class="chart-container mini"><canvas id="${sensor.chartCanvasId}"></canvas></div>
+        `;
+        sensorCards.appendChild(card);
+    });
+}
+
+function renderConfigDrivenUI() {
+    renderLanguageOptions();
+    renderSensorCards();
+}
+
+function setText(id, text) {
+    const element = document.getElementById(id);
+    if (element) element.innerText = text;
+}
+
+function refreshDynamicTranslations(lang = appState.lang) {
+    Object.entries(sensorStatusKeys).forEach(([sensorKey, translationKey]) => {
+        const sensorName = toPascalCase(sensorKey);
+        setText(`interp${sensorName}`, getTranslation(lang, translationKey));
+    });
+
+    setText('aiRecText', getTranslation(lang, currentAiRecKey));
+
+    if (appState.crop) {
+        setText('dispCrop', getTranslation(lang, `crop_${appState.crop}`));
+    }
+}
+
+function getNumberInputValue(id) {
+    const input = document.getElementById(id);
+    if (!input) return 0;
+    const value = Number(input.value);
+    return Number.isNaN(value) ? 0 : value;
+}
+
+function setNumberInputValue(id, value) {
+    const input = document.getElementById(id);
+    if (input) input.value = value;
+}
+
+function loadCropSettingsForm() {
+    if (!cropSettingsForm || !appState.crop) return;
+
+    const crop = getCurrentCropConfig();
+    setNumberInputValue('cropMoistureLow', crop.moistureIdeal[0]);
+    setNumberInputValue('cropMoistureHigh', crop.moistureIdeal[1]);
+    setNumberInputValue('cropTempLow', crop.tempIdeal[0]);
+    setNumberInputValue('cropTempHigh', crop.tempIdeal[1]);
+    setNumberInputValue('cropPhLow', crop.phIdeal[0]);
+    setNumberInputValue('cropPhHigh', crop.phIdeal[1]);
+    setNumberInputValue('cropTdsLow', crop.tdsIdeal[0]);
+    setNumberInputValue('cropTdsHigh', crop.tdsIdeal[1]);
+    setNumberInputValue('cropCriticalMoisture', crop.irrigationRules.criticalMoisture);
+    setNumberInputValue('cropStopMoisture', crop.irrigationRules.stopMoisture);
+}
+
+function setupCropSettings() {
+    if (cropSettingsForm) {
+        cropSettingsForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (!appState.crop) return;
+
+            const moistureLow = getNumberInputValue('cropMoistureLow');
+            const moistureHigh = getNumberInputValue('cropMoistureHigh');
+            const tempLow = getNumberInputValue('cropTempLow');
+            const tempHigh = getNumberInputValue('cropTempHigh');
+            const phLow = getNumberInputValue('cropPhLow');
+            const phHigh = getNumberInputValue('cropPhHigh');
+            const tdsLow = getNumberInputValue('cropTdsLow');
+            const tdsHigh = getNumberInputValue('cropTdsHigh');
+            const criticalMoisture = getNumberInputValue('cropCriticalMoisture');
+            const stopMoisture = getNumberInputValue('cropStopMoisture');
+
+            if (moistureLow > moistureHigh || tempLow > tempHigh || phLow > phHigh || tdsLow > tdsHigh || criticalMoisture > stopMoisture) {
+                showFarmAlert('Please keep every low value below its high value before saving.', 'warn', 'fa-triangle-exclamation');
+                return;
+            }
+
+            appState.cropOverrides = appState.cropOverrides || {};
+            appState.cropOverrides[appState.crop] = {
+                moistureIdeal: [moistureLow, moistureHigh],
+                tempIdeal: [tempLow, tempHigh],
+                phIdeal: [phLow, phHigh],
+                tdsIdeal: [tdsLow, tdsHigh],
+                irrigationRules: {
+                    criticalMoisture,
+                    stopMoisture
+                }
+            };
+
+            saveAppState();
+            runAILogic(getCurrentCropConfig());
+            showFarmAlert('Crop values saved for this farm.', 'success', 'fa-floppy-disk');
+        });
+    }
+
+    if (resetCropDefaultsBtn) {
+        resetCropDefaultsBtn.addEventListener('click', () => {
+            if (!appState.crop || !appState.cropOverrides) return;
+            delete appState.cropOverrides[appState.crop];
+            saveAppState();
+            loadCropSettingsForm();
+            runAILogic(getCurrentCropConfig());
+            showFarmAlert('Crop values reset to the recommended defaults.', 'info', 'fa-rotate-left');
+        });
+    }
+}
+
+// Initialize App
+document.addEventListener('DOMContentLoaded', async () => {
+    if (typeof loadTranslationFile === 'function') {
+        await loadTranslationFile();
+    }
+
+    renderConfigDrivenUI();
+    initClock();
+    setupAuthListener();
+    setupLoginEvents();
+    setupCropSettings();
+});
+
+// Check authentication state
+function setupAuthListener() {
+    if (!auth) return;
+    
+    auth.onAuthStateChanged((user) => {
+        if (user) {
+            const wasRequested = sessionStorage.getItem(LOGIN_REQUESTED_KEY) === 'true';
+            if (!wasRequested && !hasActiveAuthSession()) {
+                auth.signOut();
+                showLoginView();
+                return;
+            }
+            sessionStorage.removeItem(LOGIN_REQUESTED_KEY);
+            startAutoLogoutTimer();
+
+            localStorage.removeItem(APP_STATE_PREFIX);
+            const savedState = loadAppStateForUser(user);
+            const authName = pendingDisplayName || user.displayName || user.email || 'Guest User';
+            appState = {
+                ...savedState,
+                userId: user.uid,
+                user: savedState.user || authName,
+                isGuest: user.isAnonymous
+            };
+            pendingDisplayName = null;
+            
+            langSelect.value = appState.lang;
+            applyTranslations(appState.lang);
+            showLoginDone();
+            showDashboard();
+        } else {
+            clearAuthSession();
+            appState = createDefaultAppState();
+            showLoginView();
+        }
+    });
+}
+
+// Show login view
+function showLoginView() {
+    loginView.classList.add('active');
+    mainHeader.style.display = 'none';
+    onboardingView.classList.remove('active');
+    dashboardView.classList.remove('active');
+    setGuestLoginLoading(false);
+    setProviderButtonsLoading(false);
+    setAuthStatus('');
+}
+
+// Login successful
+function showLoginDone() {
+    loginView.classList.remove('active');
+    mainHeader.style.display = 'flex';
+    logoutBtn.style.display = 'inline-block';
+}
+
+// Setup login form events
+function setupLoginEvents() {
+    if (emailTabBtn) {
+        emailTabBtn.addEventListener('click', () => {
+            switchTab('email-tab');
+        });
+    }
+    
+    if (guestTabBtn) {
+        guestTabBtn.addEventListener('click', () => {
+            switchTab('guest-tab');
+        });
+    }
+    
+    if (loginForm) {
+        loginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            emailLogin(email, password);
+        });
+    }
+    
+    if (signupForm) {
+        signupForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const name = document.getElementById('signupName').value;
+            const email = document.getElementById('signupEmail').value;
+            const password = document.getElementById('signupPassword').value;
+            emailSignup(name, email, password);
+        });
+    }
+    
+    if (guestLoginBtn) {
+        guestLoginBtn.addEventListener('click', () => {
+            guestLogin();
+        });
+    }
+
+    if (googleLoginBtn) {
+        googleLoginBtn.addEventListener('click', () => {
+            providerLogin('google');
+        });
+    }
+
+    if (microsoftLoginBtn) {
+        microsoftLoginBtn.addEventListener('click', () => {
+            providerLogin('microsoft');
+        });
+    }
+    
+    if (toggleSignUp) {
+        toggleSignUp.addEventListener('click', (e) => {
+            e.preventDefault();
+            loginForm.style.display = 'none';
+            signupForm.style.display = 'block';
+        });
+    }
+    
+    if (toggleLogin) {
+        toggleLogin.addEventListener('click', (e) => {
+            e.preventDefault();
+            signupForm.style.display = 'none';
+            loginForm.style.display = 'block';
+        });
+    }
+    
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            logout();
+        });
+    }
+}
+
+// Switch login tabs
+function switchTab(tabName) {
+    document.querySelectorAll('.login-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    document.getElementById(tabName).classList.add('active');
+    document.getElementById(tabName.replace('tab', 'TabBtn')).classList.add('active');
+    if (tabName !== 'guest-tab') setGuestLoginLoading(false);
+}
+
+function setGuestLoginLoading(isLoading) {
+    if (!guestLoginBtn) return;
+
+    guestLoginBtn.disabled = isLoading;
+    guestLoginBtn.innerHTML = isLoading
+        ? '<i class="fa-solid fa-circle-notch fa-spin"></i> Connecting...'
+        : '<i class="fa-solid fa-user-check"></i> Continue as Guest';
+
+    if (guestAuthStatus) {
+        guestAuthStatus.innerText = isLoading ? 'Connecting anonymously with Firebase...' : '';
+    }
+}
+
+function setAuthStatus(message, type = 'info') {
+    if (!authStatus) return;
+    authStatus.innerText = message;
+    authStatus.className = `auth-status ${type}`;
+}
+
+function setProviderButtonsLoading(isLoading) {
+    [googleLoginBtn, microsoftLoginBtn].forEach((button) => {
+        if (button) button.disabled = isLoading;
+    });
+}
+langSelect.addEventListener('change', (e) => {
+    appState.lang = e.target.value;
+    applyTranslations(appState.lang);
+    saveAppState();
+    // If forecast is rendered, we might need to re-render it, but basic numbers stay the same
+});
+
+onboardingForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    appState.user = document.getElementById('opName').value;
+    appState.fieldSize = document.getElementById('fieldSize').value;
+    appState.unit = document.getElementById('fieldUnit').value;
+    appState.crop = document.getElementById('cropType').value;
+
+    saveAppState();
+    showDashboard();
+});
+
+resetBtn.addEventListener('click', () => {
+    appState.crop = null;
+    appState.fieldSize = null;
+    appState.unit = null;
+    saveAppState();
+    location.reload();
+});
+
+function showDashboard() {
+    if (dashboardTimer) {
+        clearTimeout(dashboardTimer);
+        dashboardTimer = null;
+    }
+
+    onboardingView.classList.remove('active');
+    
+    // Only show onboarding if user hasn't configured farm yet
+    if (!appState.crop) {
+        onboardingView.classList.add('active');
+        dashboardView.classList.remove('active');
+        return;
+    }
+    
+    dashboardTimer = setTimeout(() => {
+        onboardingView.classList.remove('active');
+        dashboardView.classList.add('active');
+        dashboardTimer = null;
+
+        if (!chartsInitialized) {
+            initCharts();
+            chartsInitialized = true;
+        }
+        
+        // Update display with user's farm data
+        if (appState.user) {
+            document.getElementById('dispName').innerText = appState.user;
+        }
+        
+        if (appState.fieldSize && appState.unit) {
+            document.getElementById('dispSize').innerText = `${appState.fieldSize} ${getTranslation(appState.lang, 'unit_' + appState.unit)}`;
+        }
+        
+        if (appState.crop) {
+            const cropNameKey = `crop_${appState.crop}`;
+            document.getElementById('dispCrop').setAttribute('data-i18n', cropNameKey);
+            document.getElementById('dispCrop').innerText = getTranslation(appState.lang, cropNameKey);
+        }
+        
+        updateUsageSummary();
+        loadCropSettingsForm();
+        fetchWeather(); // Initial fetch
+
+        // Setup Firebase listeners for sensors and pump
+        if (db && !firebaseListenersStarted) {
+            sensorConfigs.forEach(sensor => readFirebaseSensor(sensor.key));
+            listenPumpStatus();
+            listenFarmUsage();
+            firebaseListenersStarted = true;
+        }
+
+        if (!weatherIntervalId) {
+            weatherIntervalId = setInterval(fetchWeather, 15 * 60 * 1000); // Weather update every 15 mins
+        }
+
+    }, 400);
+}
+
+function initClock() {
+    setInterval(() => {
+        const now = new Date();
+        document.getElementById('clockDisplay').innerText = now.toLocaleTimeString('en-US', { hour12: false });
+    }, 1000);
+}
+
+// Chart.js Configuration (Lighter, softer colors)
+function initCharts() {
+    const commonOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: {
+            x: { display: false },
+            y: { display: false, min: 0 }
+        },
+        elements: {
+            point: { radius: 0 },
+            line: { tension: 0.4, borderWidth: 3 }
+        }
+    };
+
+    const createChart = (id, color, fillGlow) => {
+        const ctx = document.getElementById(id).getContext('2d');
+        const gradient = ctx.createLinearGradient(0, 0, 0, 60);
+        gradient.addColorStop(0, fillGlow);
+        gradient.addColorStop(1, 'transparent');
+
+        return new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    borderColor: color,
+                    backgroundColor: gradient,
+                    fill: true
+                }]
+            },
+            options: commonOptions
+        });
+    };
+
+    sensorConfigs.forEach((sensor) => {
+        charts[sensor.key] = createChart(sensor.chartCanvasId, sensor.chartColor, sensor.chartFill);
+    });
+}
+
+// WEATHER API LOGIC (Open-Meteo)
+function fetchWeather() {
+    // Attempt Geolocation first
+    if ("geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition(
+            position => {
+                const lat = position.coords.latitude;
+                const lon = position.coords.longitude;
+                document.getElementById('wLocation').innerText = `Lat: ${lat.toFixed(2)}, Lon: ${lon.toFixed(2)}`;
+                callWeatherApi(lat, lon);
+            },
+            error => {
+                console.warn("Geolocation blocked, using default location (New Delhi).");
+                document.getElementById('wLocation').innerText = "New Delhi, India (Default)";
+                callWeatherApi(28.61, 77.20);
+            }
+        );
+    } else {
+        document.getElementById('wLocation').innerText = "New Delhi, India (Default)";
+        callWeatherApi(28.61, 77.20);
+    }
+}
+
+async function callWeatherApi(lat, lon) {
+    try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        updateWeatherUI(data);
+    } catch (err) {
+        console.error("Failed to fetch weather:", err);
+        document.getElementById('wDesc').innerText = "Weather fetch failed.";
+    }
+}
+
+function updateWeatherUI(data) {
+    const current = data.current;
+    const daily = data.daily;
+
+    currentWeatherState.temp = current.temperature_2m;
+    currentWeatherState.rain = current.precipitation;
+    currentWeatherState.wind = current.wind_speed_10m;
+    currentWeatherState.humid = current.relative_humidity_2m;
+    currentWeatherState.code = current.weather_code;
+
+    const wmo = wmoCodes[current.weather_code] || { desc: "Unknown", icon: "fa-cloud" };
+
+    document.getElementById('wTemp').innerText = Math.round(current.temperature_2m);
+    document.getElementById('wDesc').innerText = wmo.desc;
+    document.getElementById('wMainIcon').className = `fa-solid ${wmo.icon} weather-icon-main`;
+
+    document.getElementById('wRain').innerText = current.precipitation;
+    document.getElementById('wWind').innerText = current.wind_speed_10m;
+    document.getElementById('wHumid').innerText = current.relative_humidity_2m;
+
+    if (current.precipitation > 5) {
+        showFarmAlert('Heavy rain detected. Avoid irrigation to prevent waterlogging.', 'warn', 'fa-cloud-showers-heavy');
+    }
+    if (current.temperature_2m > 40) {
+        showFarmAlert('Extreme heat alert. Check crop stress and soil moisture often.', 'danger', 'fa-temperature-arrow-up');
+    }
+    if (current.wind_speed_10m > 40) {
+        showFarmAlert('Strong wind alert. Secure loose farm equipment.', 'warn', 'fa-wind');
+    }
+
+    // Render 7 Day Forecast
+    const container = document.getElementById('forecastContainer');
+    container.innerHTML = '';
+
+    for (let i = 0; i < daily.time.length; i++) {
+        const dateStr = daily.time[i];
+        const dateObj = new Date(dateStr);
+        const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+
+        const code = daily.weather_code[i];
+        const dayWmo = wmoCodes[code] || { icon: "fa-cloud" };
+
+        const minTemp = Math.round(daily.temperature_2m_min[i]);
+        const maxTemp = Math.round(daily.temperature_2m_max[i]);
+
+        const dayDiv = document.createElement('div');
+        dayDiv.className = 'forecast-day';
+        dayDiv.innerHTML = `
+            <span class="day-name">${i === 0 ? 'Today' : dayName}</span>
+            <i class="fa-solid ${dayWmo.icon}"></i>
+            <div class="temps">
+                <span class="min">${minTemp}°</span>
+                <span class="max">${maxTemp}°</span>
+            </div>
+        `;
+        container.appendChild(dayDiv);
+    }
+}
+
+function updateSensorUI(key, val, idealRange, decimals = 1) {
+    const sensorName = toPascalCase(key);
+    const displayVal = val !== null ? val.toFixed(decimals) : '--';
+    document.getElementById(`val${sensorName}`).innerText = displayVal;
+
+    if (val !== null) {
+        sensors[key].history.push(val);
+        if (sensors[key].history.length > 10) sensors[key].history.shift();
+        if (charts[key]) {
+            charts[key].data.labels = sensors[key].history.map(() => '');
+            charts[key].data.datasets[0].data = sensors[key].history;
+            charts[key].update();
+        }
+
+        let interpKey = 'interp_normal';
+        let trendClass = 'stable';
+        let iconClass = 'fa-minus';
+
+        if (val < idealRange[0] * 0.8) {
+            interpKey = 'interp_critical'; trendClass = 'down'; iconClass = 'fa-arrow-down';
+        } else if (val < idealRange[0]) {
+            interpKey = 'interp_low'; trendClass = 'down'; iconClass = 'fa-arrow-down';
+        } else if (val > idealRange[1] * 1.2) {
+            interpKey = 'interp_critical'; trendClass = 'up'; iconClass = 'fa-arrow-up';
+        } else if (val > idealRange[1]) {
+            interpKey = 'interp_high'; trendClass = 'up'; iconClass = 'fa-arrow-up';
+        } else {
+            interpKey = 'interp_optimal'; trendClass = 'stable'; iconClass = 'fa-check';
+        }
+
+        sensorStatusKeys[key] = interpKey;
+
+        const card = document.getElementById(`card${sensorName}`);
+        const statusDiv = card.querySelector('.sensor-status');
+        const trendSpan = statusDiv.querySelector('.trend');
+        const interpSpan = statusDiv.querySelector('.interp');
+
+        trendSpan.className = `trend ${trendClass}`;
+        trendSpan.innerHTML = `<i class="fa-solid ${iconClass}"></i>`;
+        interpSpan.innerText = getTranslation(appState.lang, interpKey);
+    }
+}
+
+function resetSensorUI(key) {
+    const sensorName = toPascalCase(key);
+    const valueEl = document.getElementById(`val${sensorName}`);
+    const card = document.getElementById(`card${sensorName}`);
+
+    sensors[key].val = null;
+    sensors[key].history = [];
+    sensorStatusKeys[key] = 'interp_waiting';
+    if (valueEl) valueEl.innerText = '--';
+
+    if (charts[key]) {
+        charts[key].data.labels = [];
+        charts[key].data.datasets[0].data = [];
+        charts[key].update();
+    }
+
+    if (!card) return;
+
+    const statusDiv = card.querySelector('.sensor-status');
+    const trendSpan = statusDiv.querySelector('.trend');
+    const interpSpan = statusDiv.querySelector('.interp');
+
+    trendSpan.className = 'trend stable';
+    trendSpan.innerHTML = '<i class="fa-solid fa-minus"></i>';
+    interpSpan.innerText = getTranslation(appState.lang, 'interp_waiting');
+}
+
+function runAILogic(crop) {
+    document.getElementById('aiWaterVal').innerText = crop.waterDemand;
+
+    let health = "Optimal";
+    let healthColor = "#2b8a3e";
+
+    let m = sensors.moisture.val;
+    currentAiRecKey = 'ai_rec_normal';
+
+    if (m === null) {
+        document.getElementById('aiSoilVal').innerText = "Waiting for data";
+        document.getElementById('aiSoilVal').style.color = "#868e96";
+        currentAiRecKey = 'ai_rec_no_data';
+        health = "No Data";
+        healthColor = "#868e96";
+    } else if (m < crop.irrigationRules.criticalMoisture) {
+        document.getElementById('aiSoilVal').innerText = "Drying";
+        document.getElementById('aiSoilVal').style.color = "#d9480f";
+
+        if (typeof currentWeatherState.rain === 'number' && currentWeatherState.rain > 5) {
+            currentAiRecKey = 'ai_rec_weather_wait';
+            health = "Awaiting Rain";
+            healthColor = "#e8590c";
+        } else if (!appState.pumpActive) {
+            currentAiRecKey = 'ai_rec_start_pump';
+            health = "Water Needed";
+            healthColor = "#e03131";
+            showFarmAlert('Soil moisture is low. Irrigation may be needed soon.', 'warn', 'fa-droplet-slash');
+        }
+    } else if (m > crop.irrigationRules.stopMoisture) {
+        document.getElementById('aiSoilVal').innerText = "Saturated";
+        document.getElementById('aiSoilVal').style.color = "#1971c2";
+        showFarmAlert('Over watering risk: soil is already saturated.', 'danger', 'fa-triangle-exclamation');
+        if (appState.pumpActive) {
+            currentAiRecKey = 'ai_rec_stop_pump';
+            health = "Waterlogged Risk";
+            healthColor = "#f08c00";
+        }
+    } else {
+        document.getElementById('aiSoilVal').innerText = "Optimal";
+        document.getElementById('aiSoilVal').style.color = "#2b8a3e";
+    }
+
+    document.getElementById('aiHealthVal').innerText = health;
+    document.getElementById('aiHealthVal').style.color = healthColor;
+
+    document.getElementById('aiRecText').innerText = getTranslation(appState.lang, currentAiRecKey);
+}
+
+// Pump Control Logic
+const btnStart = document.getElementById('btnStartPump');
+const btnStop = document.getElementById('btnStopPump');
+const modal = document.getElementById('confirmModal');
+const btnCancel = document.getElementById('btnCancelCmd');
+const btnConfirm = document.getElementById('btnConfirmCmd');
+let pendingAction = null;
+
+btnStart.addEventListener('click', () => {
+    pendingAction = 'start';
+    document.getElementById('confirmText').innerText = "Initiate remote command to START WATER PUMP via controller?";
+    modal.classList.add('active');
+});
+
+btnStop.addEventListener('click', () => {
+    pendingAction = 'stop';
+    document.getElementById('confirmText').innerText = "Initiate remote command to STOP WATER PUMP via controller?";
+    modal.classList.add('active');
+});
+
+btnCancel.addEventListener('click', () => {
+    modal.classList.remove('active');
+    pendingAction = null;
+});
+
+btnConfirm.addEventListener('click', () => {
+    modal.classList.remove('active');
+    if (pendingAction === 'start') executePumpCmd('start');
+    if (pendingAction === 'stop') executePumpCmd('stop');
+});
+
+function executePumpCmd(action) {
+    const badge = document.getElementById('pumpBadge');
+    const flow = document.getElementById('connFlow');
+
+    btnStart.disabled = true;
+    btnStop.disabled = true;
+
+    badge.className = 'pump-status-badge connecting';
+    badge.innerHTML = `<i class="fa-solid fa-satellite-dish fa-spin"></i> <span>Connecting...</span>`;
+    flow.classList.add('active');
+
+    showFarmAlert(`Sending pump ${action} request to the controller.`, 'info', 'fa-satellite-dish');
+
+    // Send command via Firebase to ESP32
+    sendPumpCommand(action);
+
+    // Status will be updated via Firebase listener (listenPumpStatus)
+    // No need for timeout simulation - ESP32 will update pump/status
+}
+
+function updatePumpUI(status) {
+    const badge = document.getElementById('pumpBadge');
+    const flow = document.getElementById('connFlow');
+    const circle = document.getElementById('pumpCircle');
+
+    btnStart.disabled = status === 'on';
+    btnStop.disabled = status !== 'on';
+    flow.classList.toggle('active', status === 'on');
+    circle.classList.toggle('active', status === 'on');
+
+    if (status === 'on') {
+        badge.className = 'pump-status-badge online';
+        badge.innerHTML = '<i class="fa-solid fa-power-off"></i> <span>PUMP ON</span>';
+        showFarmAlert('Pump is running. Keep an eye on soil moisture.', 'info', 'fa-faucet-drip');
+    } else if (status === 'off') {
+        badge.className = 'pump-status-badge offline';
+        badge.innerHTML = '<i class="fa-solid fa-power-off"></i> <span>PUMP OFF</span>';
+    } else {
+        badge.className = 'pump-status-badge offline';
+        badge.innerHTML = '<i class="fa-solid fa-circle-question"></i> <span>NO STATUS</span>';
+    }
+}
+
+function updateUsageSummary() {
+    const waterValue = appState.waterUsed === null ? '--' : Math.floor(appState.waterUsed);
+    const energyValue = appState.isGuest || appState.energyUsed === null ? '--' : appState.energyUsed.toFixed(2);
+
+    const dispWater = document.getElementById('dispWater');
+    const dispEnergy = document.getElementById('dispEnergy');
+    const pumpWaterUsed = document.getElementById('pumpWaterUsed');
+    const pumpEnergyUsed = document.getElementById('pumpEnergyUsed');
+
+    if (dispWater) dispWater.innerText = waterValue;
+    if (dispEnergy) dispEnergy.innerText = energyValue;
+    if (pumpWaterUsed) pumpWaterUsed.innerText = waterValue;
+    if (pumpEnergyUsed) pumpEnergyUsed.innerText = energyValue;
+}
+
+function showFarmAlert(message, type = 'info', icon = 'fa-circle-info') {
+    const alerts = document.getElementById('farmAlerts');
+    if (!alerts) return;
+
+    const duplicate = Array.from(alerts.querySelectorAll('.farm-alert span'))
+        .some((alertText) => alertText.innerText === message);
+    if (duplicate) return;
+
+    const entry = document.createElement('div');
+    entry.className = `farm-alert ${type}`;
+    entry.innerHTML = `<i class="fa-solid ${icon}"></i><span>${message}</span>`;
+
+    alerts.prepend(entry);
+    while (alerts.children.length > 5) {
+        alerts.removeChild(alerts.lastElementChild);
+    }
+}
