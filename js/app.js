@@ -3,13 +3,13 @@
 // ==========================================
 // ADD YOUR FIREBASE CONFIG HERE
 const firebaseConfig = {
-    apiKey: "AIzaSyDWThEN0weYvtQ_k7qQqvF1X8HbBhuUpAE",
-    authDomain: "bhumibytes.firebaseapp.com",
-    databaseURL: "https://bhumibytes-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "bhumibytes",
-    storageBucket: "bhumibytes.firebasestorage.app",
-    messagingSenderId: "986382416103",
-    appId: "1:986382416103:web:cff8fe7472b5cac68f0a42"
+  apiKey: "AIzaSyB-I2MqvcDyAgV24KVukTWAF3dMqvZQCmc",
+  authDomain: "bhoomi-bytes-2d514.firebaseapp.com",
+  databaseURL: "https://bhoomi-bytes-2d514-default-rtdb.firebaseio.com",
+  projectId: "bhoomi-bytes-2d514",
+  storageBucket: "bhoomi-bytes-2d514.firebasestorage.app",
+  messagingSenderId: "402293534114",
+  appId: "1:402293534114:web:86d263b66f314a7254d6fb"
 };
 
 // Initialize Firebase
