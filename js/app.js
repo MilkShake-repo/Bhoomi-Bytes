@@ -3,13 +3,13 @@
 // ==========================================
 // ADD YOUR FIREBASE CONFIG HERE
 const firebaseConfig = {
-  apiKey: "AIzaSyB-I2MqvcDyAgV24KVukTWAF3dMqvZQCmc",
-  authDomain: "bhoomi-bytes-2d514.firebaseapp.com",
-  databaseURL: "https://bhoomi-bytes-2d514-default-rtdb.firebaseio.com",
-  projectId: "bhoomi-bytes-2d514",
-  storageBucket: "bhoomi-bytes-2d514.firebasestorage.app",
-  messagingSenderId: "402293534114",
-  appId: "1:402293534114:web:86d263b66f314a7254d6fb"
+    apiKey: "AIzaSyB-I2MqvcDyAgV24KVukTWAF3dMqvZQCmc",
+    authDomain: "bhoomi-bytes-2d514.firebaseapp.com",
+    databaseURL: "https://bhoomi-bytes-2d514-default-rtdb.firebaseio.com",
+    projectId: "bhoomi-bytes-2d514",
+    storageBucket: "bhoomi-bytes-2d514.firebasestorage.app",
+    messagingSenderId: "402293534114",
+    appId: "1:402293534114:web:86d263b66f314a7254d6fb"
 };
 
 // Initialize Firebase
@@ -25,6 +25,15 @@ const sensorConfigByKey = sensorConfigs.reduce((configs, sensor) => {
     configs[sensor.key] = sensor;
     return configs;
 }, {});
+
+function generateEsp32Token() {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let token = 'tok_';
+    for (let i = 0; i < 16; i++) {
+        token += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return token;
+}
 
 function toPascalCase(value) {
     return value.charAt(0).toUpperCase() + value.slice(1);
@@ -56,6 +65,23 @@ function getCurrentCropConfig() {
     };
 }
 
+function userDataPath(relativePath) {
+    const cleanPath = relativePath.replace(/^\/+/, '');
+    if (!appState.userId) return cleanPath;
+    
+    // User-level non-field specific nodes
+    if (cleanPath.startsWith('fields') || cleanPath.startsWith('anon_') || cleanPath.startsWith('user')) {
+        return `users/${appState.userId}/${cleanPath}`;
+    }
+    
+    // Field-specific nodes (sensors, pump, usage, etc.)
+    if (appState.activeFieldId) {
+        return `users/${appState.userId}/fields/${appState.activeFieldId}/devices/sensorData/${cleanPath}`;
+    }
+    
+    return `users/${appState.userId}/${cleanPath}`;
+}
+
 // ==========================================
 // FIREBASE AUTHENTICATION
 // ==========================================
@@ -63,7 +89,7 @@ function getCurrentCropConfig() {
 // Email/Password Login
 function emailLogin(email, password) {
     if (!auth) {
-        alert('Firebase Auth not initialized');
+        alert('Bhoomi Bytes Authentication system not initialized');
         return;
     }
     markLoginRequested();
@@ -71,15 +97,15 @@ function emailLogin(email, password) {
     auth.signInWithEmailAndPassword(email.trim(), password)
         .catch((error) => {
             clearAuthSession();
-            setAuthStatus(`Login failed: ${error.message}`, 'error');
-            alert('Login failed: ' + error.message);
+            setAuthStatus('Login failed: ' + error.message, 'error');
+            console.error('Email login failed:', error);
         });
 }
 
 // Email/Password Signup
 function emailSignup(name, email, password) {
     if (!auth) {
-        alert('Firebase Auth not initialized');
+        alert('Bhoomi Bytes Authentication system not initialized');
         return;
     }
     const displayName = name.trim();
@@ -105,10 +131,35 @@ function emailSignup(name, email, password) {
         });
 }
 
+function sendPasswordReset(email) {
+    if (!auth) {
+        alert('Bhoomi Bytes Authentication system not initialized');
+        return;
+    }
+
+    const resetEmail = email.trim();
+    if (!resetEmail) {
+        setAuthStatus('Enter your email first, then tap Forgot password.', 'error');
+        const loginEmail = document.getElementById('loginEmail');
+        if (loginEmail) loginEmail.focus();
+        return;
+    }
+
+    setAuthStatus('Sending password reset email...');
+    auth.sendPasswordResetEmail(resetEmail)
+        .then(() => {
+            setAuthStatus('Password reset email sent. Check your inbox.');
+        })
+        .catch((error) => {
+            setAuthStatus(`Reset failed: ${error.message}`, 'error');
+            alert('Password reset failed: ' + error.message);
+        });
+}
+
 // Guest Login (Anonymous)
 function guestLogin() {
     if (!auth) {
-        alert('Firebase Auth not initialized');
+        alert('Bhoomi Bytes Authentication system not initialized');
         return;
     }
 
@@ -118,29 +169,34 @@ function guestLogin() {
         .catch((error) => {
             clearAuthSession();
             setGuestLoginLoading(false);
-            alert('Guest login failed: ' + error.message);
+            if (guestAuthStatus) {
+                guestAuthStatus.innerText = 'Login failed: ' + error.message;
+                guestAuthStatus.className = 'auth-status error';
+            }
+            console.error('Guest anonymous login failed:', error);
         });
 }
 
-function providerLogin(providerName) {
+function googleLogin() {
     if (!auth || typeof firebase === 'undefined') {
-        alert('Firebase Auth not initialized');
+        alert('Bhoomi Bytes Authentication system not initialized');
         return;
     }
 
-    const provider = providerName === 'google'
-        ? new firebase.auth.GoogleAuthProvider()
-        : new firebase.auth.OAuthProvider('microsoft.com');
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.addScope('email');
+    provider.addScope('profile');
+    provider.setCustomParameters({ prompt: 'select_account' });
 
-    setAuthStatus(`Connecting with ${providerName === 'google' ? 'Google' : 'Microsoft'}...`);
+    setAuthStatus('Connecting with Google...');
     setProviderButtonsLoading(true);
     markLoginRequested();
 
     auth.signInWithPopup(provider)
         .catch((error) => {
             clearAuthSession();
-            setAuthStatus(`Login failed: ${error.message}`, 'error');
-            alert('Login failed: ' + error.message);
+            setAuthStatus('Login failed: ' + error.message, 'error');
+            console.error('Google login failed:', error);
         })
         .finally(() => {
             setProviderButtonsLoading(false);
@@ -162,13 +218,28 @@ function logout(options = {}) {
 
 // ==========================================
 
+let activeListeners = [];
+
+function detachFirebaseListeners() {
+    activeListeners.forEach(ref => {
+        try {
+            ref.off();
+        } catch (e) {
+            console.warn("Failed to detach reference listener", e);
+        }
+    });
+    activeListeners = [];
+    firebaseListenersStarted = false;
+}
+
 // Read sensor data from Firebase
 function readFirebaseSensor(sensorName) {
     if (!db) return;
     const sensorConfig = sensorConfigByKey[sensorName];
     if (!sensorConfig) return;
 
-    db.ref(sensorConfig.firebasePath).on('value', (snapshot) => {
+    const ref = db.ref(userDataPath(sensorConfig.firebasePath));
+    ref.on('value', (snapshot) => {
         const val = snapshot.val();
         const crop = getCurrentCropConfig();
         const idealRange = getSensorIdealRange(sensorName, crop);
@@ -190,6 +261,7 @@ function readFirebaseSensor(sensorName) {
         updateSensorUI(sensorName, numericVal, idealRange, sensorConfig.decimals);
         runAILogic(crop);
     });
+    activeListeners.push(ref);
 }
 
 // Write pump command to Firebase
@@ -198,7 +270,7 @@ function sendPumpCommand(action) {
         console.error('Firebase not initialized');
         return;
     }
-    db.ref('pump/command').set(action).then(() => {
+    db.ref(userDataPath('pump/command')).set(action).then(() => {
         showFarmAlert(`Pump ${action === 'start' ? 'start' : 'stop'} request sent.`, 'success', 'fa-circle-check');
     }).catch((err) => {
         showFarmAlert(`Pump command failed: ${err.message}`, 'danger', 'fa-circle-exclamation');
@@ -208,7 +280,8 @@ function sendPumpCommand(action) {
 // Listen to pump status from Firebase
 function listenPumpStatus() {
     if (!db) return;
-    db.ref('pump/status').on('value', (snapshot) => {
+    const ref = db.ref(userDataPath('pump/status'));
+    ref.on('value', (snapshot) => {
         const status = snapshot.val();
         if (status === 'on') {
             appState.pumpActive = true;
@@ -217,22 +290,27 @@ function listenPumpStatus() {
         }
         updatePumpUI(status);
     });
+    activeListeners.push(ref);
 }
 
 function listenFarmUsage() {
     if (!db) return;
 
-    db.ref('usage/waterUsed').on('value', (snapshot) => {
+    const ref1 = db.ref(userDataPath('usage/waterUsed'));
+    ref1.on('value', (snapshot) => {
         const value = Number(snapshot.val());
         appState.waterUsed = Number.isNaN(value) ? null : value;
         updateUsageSummary();
     });
+    activeListeners.push(ref1);
 
-    db.ref('usage/energyUsed').on('value', (snapshot) => {
+    const ref2 = db.ref(userDataPath('usage/energyUsed'));
+    ref2.on('value', (snapshot) => {
         const value = Number(snapshot.val());
         appState.energyUsed = Number.isNaN(value) ? null : value;
         updateUsageSummary();
     });
+    activeListeners.push(ref2);
 }
 
 // APP STATE
@@ -242,8 +320,12 @@ const APP_STATE_PREFIX = 'nexus_agri_state';
 const LOGIN_REQUESTED_KEY = 'nexus_login_requested';
 const AUTH_EXPIRES_AT_KEY = 'nexus_auth_expires_at';
 const AUTH_SESSION_MS = 10 * 60 * 1000;
+const ANON_DELETE_PREFIX = 'nexus_anon_delete_at_';
+const ANON_DELETE_MS = 10 * 60 * 1000;
 
 let autoLogoutTimer = null;
+let anonDeleteTimer = null;
+let anonDeleteExpiresAt = null;
 
 function createDefaultAppState() {
     return {
@@ -257,7 +339,9 @@ function createDefaultAppState() {
         energyUsed: null,
         userId: null,
         isGuest: false,
-        cropOverrides: {}
+        cropOverrides: {},
+        fields: {},
+        activeFieldId: null
     };
 }
 
@@ -278,6 +362,7 @@ function clearAuthSession() {
     sessionStorage.removeItem(LOGIN_REQUESTED_KEY);
     sessionStorage.removeItem(AUTH_EXPIRES_AT_KEY);
     stopAutoLogoutTimer();
+    stopAnonymousDeletionTimer();
 }
 
 function hasActiveAuthSession() {
@@ -292,6 +377,17 @@ function stopAutoLogoutTimer() {
     }
 }
 
+function stopAnonymousDeletionTimer() {
+    if (anonDeleteTimer) {
+        clearInterval(anonDeleteTimer);
+        anonDeleteTimer = null;
+    }
+    anonDeleteExpiresAt = null;
+    if (anonTimerDisplay) {
+        anonTimerDisplay.style.display = 'none';
+    }
+}
+
 function startAutoLogoutTimer() {
     stopAutoLogoutTimer();
     refreshAuthSession();
@@ -299,6 +395,150 @@ function startAutoLogoutTimer() {
         showFarmAlert('Session expired after 10 minutes. Logging out for safety.', 'warn', 'fa-clock');
         logout({ reason: 'timeout' });
     }, AUTH_SESSION_MS);
+}
+
+function getAnonDeleteKey(userId) {
+    return `${ANON_DELETE_PREFIX}${userId}`;
+}
+
+function startAnonymousDeletionTimer(user, isFreshLogin = false) {
+    if (!user || !user.isAnonymous) {
+        stopAnonymousDeletionTimer();
+        return;
+    }
+
+    // Clean up any existing timer interval first
+    if (anonDeleteTimer) {
+        clearInterval(anonDeleteTimer);
+        anonDeleteTimer = null;
+    }
+
+    const now = Date.now();
+    const key = getAnonDeleteKey(user.uid);
+    let expiresAt = Number(localStorage.getItem(key));
+
+    if (isFreshLogin || !Number.isFinite(expiresAt) || expiresAt <= now) {
+        expiresAt = now + ANON_DELETE_MS;
+        localStorage.setItem(key, String(expiresAt));
+        console.log(`[Guest Timer] Reset timer for anonymous user ${user.uid} to expire in 10 minutes.`);
+    }
+
+    anonDeleteExpiresAt = expiresAt;
+    if (anonTimerDisplay) {
+        anonTimerDisplay.style.display = 'block';
+    }
+    updateAnonymousTimerDisplay();
+    anonDeleteTimer = setInterval(updateAnonymousTimerDisplay, 1000);
+}
+
+function updateAnonymousTimerDisplay() {
+    const isGuest = auth && auth.currentUser && auth.currentUser.isAnonymous;
+
+    // Toggle settings timer display
+    if (settingsAnonTimerDisplay) {
+        if (isGuest && anonDeleteExpiresAt) {
+            settingsAnonTimerDisplay.style.display = 'block';
+        } else {
+            settingsAnonTimerDisplay.style.display = 'none';
+        }
+    }
+
+    if (!anonDeleteExpiresAt) return;
+
+    const remaining = anonDeleteExpiresAt - Date.now();
+    if (remaining <= 0) {
+        if (anonTimerDisplay) {
+            anonTimerDisplay.innerText = 'Guest account expires now.';
+        }
+        if (settingsAnonTimerDisplay) {
+            settingsAnonTimerDisplay.innerText = 'Guest account expires now.';
+        }
+        handleAnonymousExpiration();
+        return;
+    }
+
+    const minutes = Math.floor(remaining / 60000);
+    const seconds = Math.floor((remaining % 60000) / 1000);
+    const timeString = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
+    if (anonTimerDisplay) {
+        anonTimerDisplay.innerText = `Guest account expires in ${timeString}`;
+    }
+
+    if (settingsAnonTimerDisplay) {
+        const lang = (appState && appState.lang) ? appState.lang : 'en';
+        const translation = getTranslation(lang, 'label_guest_timer_desc') || 
+            `Guest account expires in {time}. After 10 minutes, the account will be automatically deleted.`;
+        settingsAnonTimerDisplay.innerText = translation.replace('{time}', timeString);
+    }
+}
+
+function refreshDynamicTranslations(lang) {
+    updateAnonymousTimerDisplay();
+}
+
+function handleAnonymousExpiration() {
+    stopAnonymousDeletionTimer();
+
+    if (!auth || !auth.currentUser || !auth.currentUser.isAnonymous) return;
+    const user = auth.currentUser;
+    localStorage.removeItem(getAnonDeleteKey(user.uid));
+    deleteAnonymousAccount(user, true);
+}
+
+function deleteAnonymousAccount(user, isAuto = false) {
+    if (!user) return;
+
+    const userStateKey = getAppStateKey(user.uid);
+    const cleanup = () => {
+        localStorage.removeItem(userStateKey);
+        localStorage.removeItem(getAnonDeleteKey(user.uid));
+        clearAuthSession();
+        appState = createDefaultAppState();
+        if (isAuto) {
+            showLoginView();
+        } else {
+            location.reload();
+        }
+    };
+
+    const deleteAuthUser = () => {
+        user.delete()
+            .then(cleanup)
+            .catch((error) => {
+                if (isAuto) {
+                    cleanup();
+                } else {
+                    if (deleteAccountBtn) deleteAccountBtn.disabled = false;
+                    showFarmAlert(`Account delete failed: ${error.message}`, 'danger', 'fa-circle-exclamation');
+                }
+            });
+    };
+
+    const performDelete = () => {
+        if (!db) {
+            deleteAuthUser();
+            return;
+        }
+
+        db.ref(`users/${user.uid}`).remove()
+            .then(deleteAuthUser)
+            .catch((error) => {
+                if (isAuto) {
+                    deleteAuthUser();
+                } else {
+                    if (deleteAccountBtn) deleteAccountBtn.disabled = false;
+                    showFarmAlert(`Account data delete failed: ${error.message}`, 'danger', 'fa-circle-exclamation');
+                }
+            });
+    };
+
+    // If it is an automatic reload delete, wait 300ms to ensure database auth state is fully synchronized
+    if (isAuto) {
+        setTimeout(performDelete, 300);
+    } else {
+        performDelete();
+    }
 }
 
 function handleUserActivity() {
@@ -364,15 +604,38 @@ const emailTabBtn = document.getElementById('emailTabBtn');
 const guestTabBtn = document.getElementById('guestTabBtn');
 const loginForm = document.getElementById('loginForm');
 const signupForm = document.getElementById('signupForm');
+const forgotPasswordLink = document.getElementById('forgotPasswordLink');
 const guestLoginBtn = document.getElementById('guestLoginBtn');
 const guestAuthStatus = document.getElementById('guestAuthStatus');
 const authStatus = document.getElementById('authStatus');
 const googleLoginBtn = document.getElementById('googleLoginBtn');
-const microsoftLoginBtn = document.getElementById('microsoftLoginBtn');
 const toggleSignUp = document.getElementById('toggleSignUp');
 const toggleLogin = document.getElementById('toggleLogin');
 const cropSettingsForm = document.getElementById('cropSettingsForm');
 const resetCropDefaultsBtn = document.getElementById('resetCropDefaultsBtn');
+const dispFirebaseUid = document.getElementById('dispFirebaseUid');
+const farmSettingsBtn = document.getElementById('farmSettingsBtn');
+const farmSettingsModal = document.getElementById('farmSettingsModal');
+const farmSettingsForm = document.getElementById('farmSettingsForm');
+const farmSettingsCancelBtn = document.getElementById('farmSettingsCancelBtn');
+const settingsName = document.getElementById('settingsName');
+const settingsFieldName = document.getElementById('settingsFieldName');
+const settingsFieldSize = document.getElementById('settingsFieldSize');
+const settingsFieldUnit = document.getElementById('settingsFieldUnit');
+const settingsCropType = document.getElementById('settingsCropType');
+const settingsFieldEsp32TokenDisplay = document.getElementById('settingsFieldEsp32TokenDisplay');
+const settingsActiveFieldId = document.getElementById('settingsActiveFieldId');
+const anonTimerDisplay = document.getElementById('anonTimerDisplay');
+const settingsAnonTimerDisplay = document.getElementById('settingsAnonTimerDisplay');
+const deleteAccountBtn = document.getElementById('deleteAccountBtn');
+
+// Add Field Modal & Dropdown Switcher
+const addFieldModal = document.getElementById('addFieldModal');
+const addFieldForm = document.getElementById('addFieldForm');
+const btnAddFieldBtn = document.getElementById('btnAddFieldBtn');
+const btnAddFieldCancel = document.getElementById('btnAddFieldCancel');
+const fieldSelect = document.getElementById('fieldSelect');
+const fieldSelectorContainer = document.getElementById('fieldSelectorContainer');
 
 function renderLanguageOptions() {
     if (!langSelect) return;
@@ -422,6 +685,327 @@ function renderConfigDrivenUI() {
 function setText(id, text) {
     const element = document.getElementById(id);
     if (element) element.innerText = text;
+}
+
+function updateFirebaseUidDisplay() {
+    const defaultUid = appState.userId || '--';
+    const activeField = appState.fields && appState.fields[appState.activeFieldId];
+    const rawToken = activeField && (activeField['deviceToken(microController)'] || activeField.deviceToken || activeField.esp32Token);
+    const activeUid = (rawToken && rawToken.trim()) || defaultUid;
+
+    if (dispFirebaseUid) dispFirebaseUid.innerText = activeUid;
+}
+
+function updateFarmSummaryUI() {
+    if (appState.user) {
+        setText('dispName', appState.user);
+    }
+
+    if (appState.fieldSize && appState.unit) {
+        setText('dispSize', `${appState.fieldSize} ${getTranslation(appState.lang, 'unit_' + appState.unit)}`);
+    }
+
+    if (appState.crop) {
+        const cropNameKey = `crop_${appState.crop}`;
+        const cropElement = document.getElementById('dispCrop');
+        if (cropElement) {
+            cropElement.setAttribute('data-i18n', cropNameKey);
+            cropElement.innerText = getTranslation(appState.lang, cropNameKey);
+        }
+    }
+
+    updateFirebaseUidDisplay();
+}
+
+function openFarmSettings() {
+    if (!farmSettingsModal) return;
+
+    if (settingsName) settingsName.value = appState.user || '';
+    if (settingsFieldSize) settingsFieldSize.value = appState.fieldSize || '';
+    if (settingsFieldUnit) settingsFieldUnit.value = appState.unit || 'bigha';
+    if (settingsCropType) settingsCropType.value = appState.crop || 'rice';
+    
+    const activeField = appState.fields && appState.fields[appState.activeFieldId];
+    
+    // Field details mapping
+    if (settingsFieldName && activeField) {
+        settingsFieldName.value = activeField.name || '';
+    } else if (settingsFieldName) {
+        settingsFieldName.value = 'Main Field';
+    }
+    
+    if (settingsFieldEsp32TokenDisplay) {
+        const rawToken = activeField && (activeField['deviceToken(microController)'] || activeField.deviceToken || activeField.esp32Token);
+        settingsFieldEsp32TokenDisplay.innerText = rawToken || '--';
+    }
+    
+    if (settingsActiveFieldId) {
+        settingsActiveFieldId.innerText = appState.activeFieldId || '--';
+    }
+    
+    updateFirebaseUidDisplay();
+    farmSettingsModal.classList.add('active');
+}
+
+function closeFarmSettings() {
+    if (farmSettingsModal) farmSettingsModal.classList.remove('active');
+}
+
+function setupFarmSettings() {
+    if (farmSettingsBtn) {
+        farmSettingsBtn.addEventListener('click', openFarmSettings);
+    }
+
+    if (farmSettingsCancelBtn) {
+        farmSettingsCancelBtn.addEventListener('click', closeFarmSettings);
+    }
+
+    if (farmSettingsModal) {
+        farmSettingsModal.addEventListener('click', (event) => {
+            if (event.target === farmSettingsModal) closeFarmSettings();
+        });
+    }
+
+    if (farmSettingsForm) {
+        farmSettingsForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+
+            const farmerName = settingsName.value.trim();
+            const fieldSize = Number(settingsFieldSize.value);
+            const activeFieldName = settingsFieldName ? settingsFieldName.value.trim() : 'Main Field';
+
+            if (!farmerName) {
+                showFarmAlert('Please enter a farmer name.', 'warn', 'fa-triangle-exclamation');
+                return;
+            }
+
+            if (!Number.isFinite(fieldSize) || fieldSize <= 0) {
+                showFarmAlert('Please enter a valid field size.', 'warn', 'fa-triangle-exclamation');
+                return;
+            }
+
+            const activeField = appState.fields && appState.fields[appState.activeFieldId];
+            const rawOldToken = activeField && (activeField['deviceToken(microController)'] || activeField.deviceToken || activeField.esp32Token);
+            const oldToken = rawOldToken ? rawOldToken.trim() : '';
+            const customEsp32Token = oldToken;
+
+            appState.user = farmerName;
+            appState.fieldSize = fieldSize;
+            appState.unit = settingsFieldUnit.value;
+            appState.crop = settingsCropType.value;
+
+            if (appState.fields && appState.fields[appState.activeFieldId]) {
+                appState.fields[appState.activeFieldId]['deviceToken(microController)'] = customEsp32Token;
+            }
+            if (db && appState.userId) {
+                db.ref(`users/${appState.userId}/profile`).update({
+                    name: farmerName,
+                    lastActive: firebase.database.ServerValue.TIMESTAMP
+                }).catch(err => {
+                    console.warn("Failed to update profile name in DB:", err);
+                });
+            }
+
+            // Write back updated field specific details to Firebase
+            if (db && appState.activeFieldId) {
+
+                const updatedField = {
+                    id: appState.activeFieldId,
+                    name: activeFieldName || 'Main Field',
+                    crop: appState.crop,
+                    fieldSize: appState.fieldSize,
+                    unit: appState.unit,
+                    'deviceToken(microController)': customEsp32Token
+                };
+                
+                detachFirebaseListeners();
+                
+                db.ref(`users/${appState.userId}/fields/${appState.activeFieldId}`).update(updatedField);
+            }
+
+            saveAppState();
+            updateFarmSummaryUI();
+            loadCropSettingsForm();
+            runAILogic(getCurrentCropConfig());
+            closeFarmSettings();
+            showFarmAlert('Farm settings updated.', 'success', 'fa-circle-check');
+        });
+    }
+
+    // Delete Field Event Listeners
+    const deleteFieldBtn = document.getElementById('deleteFieldBtn');
+    const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+    const confirmCancelBtn = document.getElementById('confirmCancelBtn');
+    const confirmationModal = document.getElementById('confirmationModal');
+
+    if (deleteFieldBtn) {
+        deleteFieldBtn.addEventListener('click', () => {
+            const activeFieldId = appState.activeFieldId;
+            if (!activeFieldId || !appState.fields || !appState.fields[activeFieldId]) return;
+
+            const activeField = appState.fields[activeFieldId];
+            
+            // Show custom confirmation modal
+            const confirmModalBody = document.getElementById('confirmModalBody');
+            if (confirmationModal && confirmModalBody) {
+                confirmModalBody.innerText = `Are you sure you want to delete the field "${activeField.name || 'Main Field'}"? This will permanently delete all its sensor values and control history from the database.`;
+                confirmationModal.classList.add('active');
+            }
+        });
+    }
+
+    if (confirmCancelBtn && confirmationModal) {
+        confirmCancelBtn.addEventListener('click', () => {
+            confirmationModal.classList.remove('active');
+        });
+    }
+
+    if (confirmationModal) {
+        confirmationModal.addEventListener('click', (event) => {
+            if (event.target === confirmationModal) {
+                confirmationModal.classList.remove('active');
+            }
+        });
+    }
+
+    if (confirmDeleteBtn) {
+        confirmDeleteBtn.addEventListener('click', () => {
+            const activeFieldId = appState.activeFieldId;
+            if (!activeFieldId || !appState.fields || !appState.fields[activeFieldId]) {
+                if (confirmationModal) confirmationModal.classList.remove('active');
+                return;
+            }
+
+            const activeField = appState.fields[activeFieldId];
+            const esp32Token = activeField.esp32Token ? activeField.esp32Token.trim() : '';
+
+            // Disable button during delete
+            confirmDeleteBtn.disabled = true;
+            confirmDeleteBtn.innerText = 'Deleting...';
+
+            const cleanupAndClose = () => {
+                // Remove field from local state
+                if (appState.fields) {
+                    delete appState.fields[activeFieldId];
+                }
+                
+                // Select next available field, or reset if none left
+                const remainingFieldIds = Object.keys(appState.fields || {});
+                if (remainingFieldIds.length > 0) {
+                    appState.activeFieldId = remainingFieldIds[0];
+                    const nextField = appState.fields[appState.activeFieldId];
+                    appState.crop = nextField.crop;
+                    appState.fieldSize = nextField.fieldSize;
+                    appState.unit = nextField.unit;
+                } else {
+                    appState.activeFieldId = null;
+                    appState.crop = null;
+                    appState.fieldSize = null;
+                    appState.unit = null;
+                }
+
+                saveAppState();
+                
+                // Re-enable and reset confirm button
+                confirmDeleteBtn.disabled = false;
+                confirmDeleteBtn.innerText = 'Delete';
+                
+                // Close modals
+                if (confirmationModal) confirmationModal.classList.remove('active');
+                closeFarmSettings();
+                
+                // Refresh UI
+                updateFarmSummaryUI();
+                loadCropSettingsForm();
+                
+                if (appState.activeFieldId) {
+                    switchField(appState.activeFieldId);
+                    showFarmAlert('Field deleted successfully.', 'success', 'fa-circle-check');
+                } else {
+                    detachFirebaseListeners();
+                    showDashboard(); // Will show onboarding since crop is null
+                    showFarmAlert('All fields deleted. Please configure a new farm.', 'info', 'fa-mountain-sun');
+                }
+            };
+
+            if (db) {
+                // 1. Delete metadata
+                db.ref(`users/${appState.userId}/fields/${activeFieldId}`).remove()
+                    .then(() => {
+                        // 2. Delete custom token path if applicable and different
+                        if (esp32Token && esp32Token !== appState.userId) {
+                            return db.ref(`users/${esp32Token}/fields/${activeFieldId}`).remove();
+                        }
+                    })
+                    .then(() => {
+                        cleanupAndClose();
+                    })
+                    .catch((err) => {
+                        confirmDeleteBtn.disabled = false;
+                        confirmDeleteBtn.innerText = 'Delete';
+                        showFarmAlert(`Failed to delete field from database: ${err.message}`, 'danger', 'fa-circle-exclamation');
+                    });
+            } else {
+                cleanupAndClose();
+            }
+        });
+    }
+
+    if (deleteAccountBtn) {
+        deleteAccountBtn.addEventListener('click', deleteAccount);
+    }
+}
+
+function setAccountDangerButtonsLoading(isLoading, activeButton, loadingText) {
+    if (deleteAccountBtn) deleteAccountBtn.disabled = isLoading;
+
+    if (activeButton) {
+        activeButton.innerText = isLoading ? loadingText : getTranslation(appState.lang, 'btn_delete_account');
+    }
+}
+
+function deleteAccount() {
+    if (!auth || !auth.currentUser || !appState.userId) {
+        showFarmAlert('Sign in before deleting your account.', 'warn', 'fa-triangle-exclamation');
+        return;
+    }
+
+    const confirmed = window.confirm('Delete this Firebase account permanently? This also clears farm setup, sensor cache, pump status, and usage data. You cannot undo this.');
+    if (!confirmed) return;
+
+    setAccountDangerButtonsLoading(true, deleteAccountBtn, 'Deleting...');
+
+    const user = auth.currentUser;
+    const userStateKey = getAppStateKey(appState.userId);
+    const deleteAuthUser = () => {
+        user.delete()
+            .then(() => {
+                localStorage.removeItem(userStateKey);
+                clearAuthSession();
+                appState = createDefaultAppState();
+                location.reload();
+            })
+            .catch((error) => {
+                setAccountDangerButtonsLoading(false, deleteAccountBtn);
+                if (error.code === 'auth/requires-recent-login') {
+                    showFarmAlert('Please log out, sign in again, then delete the account.', 'warn', 'fa-key');
+                } else {
+                    showFarmAlert(`Account delete failed: ${error.message}`, 'danger', 'fa-circle-exclamation');
+                }
+            });
+    };
+
+    if (!db) {
+        deleteAuthUser();
+        return;
+    }
+
+    db.ref(`users/${appState.userId}`).remove()
+        .then(deleteAuthUser)
+        .catch((error) => {
+            setAccountDangerButtonsLoading(false, deleteAccountBtn);
+            showFarmAlert(`Account data delete failed: ${error.message}`, 'danger', 'fa-circle-exclamation');
+        });
 }
 
 function refreshDynamicTranslations(lang = appState.lang) {
@@ -528,6 +1112,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupAuthListener();
     setupLoginEvents();
     setupCropSettings();
+    setupFarmSettings();
 });
 
 // Check authentication state
@@ -537,7 +1122,20 @@ function setupAuthListener() {
     auth.onAuthStateChanged((user) => {
         if (user) {
             const wasRequested = sessionStorage.getItem(LOGIN_REQUESTED_KEY) === 'true';
+            
+            // Check if page was reloaded
+            const isReload = performance.navigation.type === 1 || 
+                             (performance.getEntriesByType('navigation')[0] && 
+                              performance.getEntriesByType('navigation')[0].type === 'reload');
+
+            if (user.isAnonymous && isReload) {
+                console.log("[AuthListener] Guest user reloaded page. Purging guest session.");
+                deleteAnonymousAccount(user, true);
+                return;
+            }
+
             if (!wasRequested && !hasActiveAuthSession()) {
+                console.log("[AuthListener] Stale session or no request detected. Signing out user.");
                 auth.signOut();
                 showLoginView();
                 return;
@@ -555,14 +1153,38 @@ function setupAuthListener() {
                 isGuest: user.isAnonymous
             };
             pendingDisplayName = null;
+
+            if (db) {
+                if (user.isAnonymous) {
+                    // Set up automatic server-side database cleanup if they close the tab or reload
+                    db.ref(`users/${user.uid}`).onDisconnect().remove();
+                }
+
+                db.ref(`users/${user.uid}/profile`).update({
+                    name: appState.user || authName,
+                    email: user.email || 'Guest Account',
+                    isGuest: user.isAnonymous,
+                    lastActive: firebase.database.ServerValue.TIMESTAMP
+                }).catch(err => {
+                    console.warn("Failed to update user profile in DB:", err);
+                });
+            }
             
             langSelect.value = appState.lang;
             applyTranslations(appState.lang);
+            updateFirebaseUidDisplay();
+            startAnonymousDeletionTimer(user, wasRequested);
             showLoginDone();
-            showDashboard();
+            loadFieldsList();
         } else {
+            detachFirebaseListeners();
+            if (fieldsListenerRef) {
+                fieldsListenerRef.off();
+                fieldsListenerRef = null;
+            }
             clearAuthSession();
             appState = createDefaultAppState();
+            updateFirebaseUidDisplay();
             showLoginView();
         }
     });
@@ -608,6 +1230,13 @@ function setupLoginEvents() {
             emailLogin(email, password);
         });
     }
+
+    if (forgotPasswordLink) {
+        forgotPasswordLink.addEventListener('click', () => {
+            const email = document.getElementById('loginEmail').value;
+            sendPasswordReset(email);
+        });
+    }
     
     if (signupForm) {
         signupForm.addEventListener('submit', (e) => {
@@ -620,20 +1249,18 @@ function setupLoginEvents() {
     }
     
     if (guestLoginBtn) {
-        guestLoginBtn.addEventListener('click', () => {
+        guestLoginBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
             guestLogin();
         });
     }
 
     if (googleLoginBtn) {
-        googleLoginBtn.addEventListener('click', () => {
-            providerLogin('google');
-        });
-    }
-
-    if (microsoftLoginBtn) {
-        microsoftLoginBtn.addEventListener('click', () => {
-            providerLogin('microsoft');
+        googleLoginBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            googleLogin();
         });
     }
     
@@ -694,9 +1321,7 @@ function setAuthStatus(message, type = 'info') {
 }
 
 function setProviderButtonsLoading(isLoading) {
-    [googleLoginBtn, microsoftLoginBtn].forEach((button) => {
-        if (button) button.disabled = isLoading;
-    });
+    if (googleLoginBtn) googleLoginBtn.disabled = isLoading;
 }
 langSelect.addEventListener('change', (e) => {
     appState.lang = e.target.value;
@@ -708,20 +1333,80 @@ langSelect.addEventListener('change', (e) => {
 onboardingForm.addEventListener('submit', (e) => {
     e.preventDefault();
     appState.user = document.getElementById('opName').value;
-    appState.fieldSize = document.getElementById('fieldSize').value;
-    appState.unit = document.getElementById('fieldUnit').value;
-    appState.crop = document.getElementById('cropType').value;
+    const size = Number(document.getElementById('fieldSize').value);
+    const unit = document.getElementById('fieldUnit').value;
+    const crop = document.getElementById('cropType').value;
+    
+    const onboardingEsp32Token = generateEsp32Token();
 
-    saveAppState();
-    showDashboard();
+    appState.fieldSize = size;
+    appState.unit = unit;
+    appState.crop = crop;
+
+    const fieldId = 'field_1';
+    appState.activeFieldId = fieldId;
+
+    const newField = {
+        id: fieldId,
+        name: 'Main Field',
+        crop: crop,
+        fieldSize: size,
+        unit: unit,
+        'deviceToken(microController)': onboardingEsp32Token
+    };
+
+    if (db && appState.userId) {
+        const defaultSensorData = {
+            sensors: {
+                humidity: 45,
+                moisture: 30,
+                ph: 6.5,
+                tds: 450,
+                temp: 24
+            },
+            pump: {
+                active: false,
+                lastSwitched: firebase.database.ServerValue.TIMESTAMP
+            },
+            usage: {
+                waterUsed: 0,
+                energyUsed: 0
+            }
+        };
+
+        Promise.all([
+            db.ref(`users/${appState.userId}/fields/${fieldId}`).set(newField),
+            db.ref(`users/${appState.userId}/fields/${fieldId}/devices/sensorData`).set(defaultSensorData)
+        ]).then(() => {
+            saveAppState();
+            loadFieldsList();
+        });
+    } else {
+        saveAppState();
+        showDashboard();
+    }
 });
 
 resetBtn.addEventListener('click', () => {
-    appState.crop = null;
-    appState.fieldSize = null;
-    appState.unit = null;
-    saveAppState();
-    location.reload();
+    if (db && appState.userId) {
+        db.ref(`users/${appState.userId}/fields`).remove().then(() => {
+            appState.crop = null;
+            appState.fieldSize = null;
+            appState.unit = null;
+            appState.activeFieldId = null;
+            appState.fields = {};
+            saveAppState();
+            location.reload();
+        });
+    } else {
+        appState.crop = null;
+        appState.fieldSize = null;
+        appState.unit = null;
+        appState.activeFieldId = null;
+        appState.fields = {};
+        saveAppState();
+        location.reload();
+    }
 });
 
 function showDashboard() {
@@ -736,6 +1421,7 @@ function showDashboard() {
     if (!appState.crop) {
         onboardingView.classList.add('active');
         dashboardView.classList.remove('active');
+        if (fieldSelectorContainer) fieldSelectorContainer.style.display = 'none';
         return;
     }
     
@@ -749,27 +1435,13 @@ function showDashboard() {
             chartsInitialized = true;
         }
         
-        // Update display with user's farm data
-        if (appState.user) {
-            document.getElementById('dispName').innerText = appState.user;
-        }
-        
-        if (appState.fieldSize && appState.unit) {
-            document.getElementById('dispSize').innerText = `${appState.fieldSize} ${getTranslation(appState.lang, 'unit_' + appState.unit)}`;
-        }
-        
-        if (appState.crop) {
-            const cropNameKey = `crop_${appState.crop}`;
-            document.getElementById('dispCrop').setAttribute('data-i18n', cropNameKey);
-            document.getElementById('dispCrop').innerText = getTranslation(appState.lang, cropNameKey);
-        }
-        
+        updateFarmSummaryUI();
         updateUsageSummary();
         loadCropSettingsForm();
         fetchWeather(); // Initial fetch
 
         // Setup Firebase listeners for sensors and pump
-        if (db && !firebaseListenersStarted) {
+        if (db && !firebaseListenersStarted && appState.activeFieldId) {
             sensorConfigs.forEach(sensor => readFirebaseSensor(sensor.key));
             listenPumpStatus();
             listenFarmUsage();
@@ -781,6 +1453,209 @@ function showDashboard() {
         }
 
     }, 400);
+}
+
+// ==========================================
+// DYNAMIC MULTI-FIELD SYSTEM MANAGEMENT
+// ==========================================
+let fieldsListenerRef = null;
+
+function loadFieldsList() {
+    if (!db || !appState.userId) {
+        showDashboard();
+        return;
+    }
+    
+    if (fieldsListenerRef) {
+        fieldsListenerRef.off();
+    }
+    
+    fieldsListenerRef = db.ref(`users/${appState.userId}/fields`);
+    fieldsListenerRef.on('value', (snapshot) => {
+        const fields = snapshot.val() || {};
+        appState.fields = fields;
+        
+        if (Object.keys(fields).length === 0) {
+            if (fieldSelectorContainer) fieldSelectorContainer.style.display = 'none';
+            appState.crop = null;
+            appState.fieldSize = null;
+            appState.unit = null;
+            appState.activeFieldId = null;
+            showDashboard();
+            return;
+        }
+        
+        if (fieldSelectorContainer) fieldSelectorContainer.style.display = 'flex';
+        if (fieldSelect) {
+            fieldSelect.innerHTML = '';
+            Object.values(fields).forEach(field => {
+                const opt = document.createElement('option');
+                opt.value = field.id;
+                opt.innerText = `${field.name} (${toPascalCase(field.crop)})`;
+                fieldSelect.appendChild(opt);
+            });
+        }
+        
+        // Match active field ID
+        if (!appState.activeFieldId || !fields[appState.activeFieldId]) {
+            appState.activeFieldId = Object.keys(fields)[0];
+        }
+        
+        if (fieldSelect) {
+            fieldSelect.value = appState.activeFieldId;
+        }
+        
+        // Sync parameters
+        const activeField = fields[appState.activeFieldId];
+        appState.crop = activeField.crop;
+        appState.fieldSize = activeField.fieldSize;
+        appState.unit = activeField.unit;
+        
+        saveAppState();
+        showDashboard();
+    });
+}
+
+function switchField(fieldId) {
+    if (!appState.fields || !appState.fields[fieldId]) return;
+    
+    detachFirebaseListeners();
+    appState.activeFieldId = fieldId;
+    
+    const activeField = appState.fields[fieldId];
+    appState.crop = activeField.crop;
+    appState.fieldSize = activeField.fieldSize;
+    appState.unit = activeField.unit;
+    
+    saveAppState();
+    
+    // Reset charts and sensor readings UI elements
+    sensorConfigs.forEach(sensor => resetSensorUI(sensor.key));
+    
+    // Refresh display
+    updateFarmSummaryUI();
+    loadCropSettingsForm();
+    runAILogic(getCurrentCropConfig());
+    
+    // Re-attach listeners on new paths
+    if (db) {
+        sensorConfigs.forEach(sensor => readFirebaseSensor(sensor.key));
+        listenPumpStatus();
+        listenFarmUsage();
+        firebaseListenersStarted = true;
+    }
+    
+    showFarmAlert(`Switched active field to: ${activeField.name}`, 'info', 'fa-mountain-sun');
+}
+
+// Bind dropdown switch event listener
+if (fieldSelect) {
+    fieldSelect.addEventListener('change', (e) => {
+        switchField(e.target.value);
+    });
+}
+
+// Add Field Modal Event Listeners
+if (btnAddFieldBtn) {
+    btnAddFieldBtn.addEventListener('click', () => {
+        if (addFieldModal) {
+            // Reset inputs
+            const nameInput = document.getElementById('newFieldName');
+            const sizeInput = document.getElementById('newFieldSize');
+            if (nameInput) nameInput.value = '';
+            if (sizeInput) sizeInput.value = '';
+            addFieldModal.classList.add('active');
+        }
+    });
+}
+
+if (btnAddFieldCancel) {
+    btnAddFieldCancel.addEventListener('click', () => {
+        if (addFieldModal) addFieldModal.classList.remove('active');
+    });
+}
+
+if (addFieldModal) {
+    addFieldModal.addEventListener('click', (event) => {
+        if (event.target === addFieldModal) addFieldModal.classList.remove('active');
+    });
+}
+
+if (addFieldForm) {
+    addFieldForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        
+        const name = document.getElementById('newFieldName').value.trim();
+        const crop = document.getElementById('newFieldCrop').value;
+        const size = Number(document.getElementById('newFieldSize').value);
+        const unit = document.getElementById('newFieldUnit').value;
+        
+        const esp32Token = generateEsp32Token();
+        
+        if (!name) {
+            showFarmAlert('Please enter a field name.', 'warn', 'fa-triangle-exclamation');
+            return;
+        }
+        
+        if (!Number.isFinite(size) || size <= 0) {
+            showFarmAlert('Please enter a valid field size.', 'warn', 'fa-triangle-exclamation');
+            return;
+        }
+        
+        let nextNumber = 1;
+        if (appState.fields) {
+            const keys = Object.keys(appState.fields);
+            const numbers = keys.map(k => {
+                const match = k.match(/^field_(\d+)$/);
+                return match ? parseInt(match[1], 10) : 0;
+            });
+            if (numbers.length > 0) {
+                nextNumber = Math.max(...numbers) + 1;
+            }
+        }
+        const fieldId = `field_${nextNumber}`;
+        const newField = {
+            id: fieldId,
+            name: name,
+            crop: crop,
+            fieldSize: size,
+            unit: unit,
+            'deviceToken(microController)': esp32Token
+        };
+        
+        if (db && appState.userId) {
+            detachFirebaseListeners();
+            appState.activeFieldId = fieldId;
+
+            const defaultSensorData = {
+                sensors: {
+                    humidity: 45,
+                    moisture: 30,
+                    ph: 6.5,
+                    tds: 450,
+                    temp: 24
+                },
+                pump: {
+                    active: false,
+                    lastSwitched: firebase.database.ServerValue.TIMESTAMP
+                },
+                usage: {
+                    waterUsed: 0,
+                    energyUsed: 0
+                }
+            };
+
+            Promise.all([
+                db.ref(`users/${appState.userId}/fields/${fieldId}`).set(newField),
+                db.ref(`users/${appState.userId}/fields/${fieldId}/devices/sensorData`).set(defaultSensorData)
+            ]).then(() => {
+                if (addFieldModal) addFieldModal.classList.remove('active');
+                showFarmAlert(`Added and switched to field: ${name}`, 'success', 'fa-circle-check');
+            }).catch((err) => {
+                showFarmAlert(`Failed to add field: ${err.message}`, 'danger', 'fa-circle-exclamation');
+            });
+        }
+    });
 }
 
 function initClock() {
@@ -1152,3 +2027,13 @@ function showFarmAlert(message, type = 'info', icon = 'fa-circle-info') {
         alerts.removeChild(alerts.lastElementChild);
     }
 }
+
+window.addEventListener('beforeunload', () => {
+    if (auth && auth.currentUser && auth.currentUser.isAnonymous) {
+        const uid = auth.currentUser.uid;
+        localStorage.removeItem(getAppStateKey(uid));
+        localStorage.removeItem(getAnonDeleteKey(uid));
+        sessionStorage.clear();
+        auth.signOut();
+    }
+});

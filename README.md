@@ -6,9 +6,9 @@ This README avoids personal project credentials. Replace every placeholder value
 
 ## Features
 
-- Email/password, Google, Microsoft, and guest login support
+- Email/password, Google, guest login, password reset, and account deletion support
 - 10 minute inactive-session timeout
-- Live dashboard for soil moisture, soil temperature, air humidity, pH, and TDS nutrients
+- Authenticated per-user dashboard for soil moisture, soil temperature, air humidity, pH, and TDS nutrients
 - Crop-specific default values with editable overrides
 - Pump start/stop commands through Firebase
 - Water and energy usage summary
@@ -58,26 +58,62 @@ Enable these Firebase Authentication providers as needed:
 - Email/password
 - Anonymous
 - Google
-- Microsoft
+
+The web app shows an `ESP32 token` after login. This value is the user's stable Firebase UID and is used by the ESP32 as the database owner path.
 
 ## Firebase Database Paths
 
 ```text
-sensors/
+users/{uid}/sensors/
 |-- moisture: number, percent
 |-- temp: number, Celsius
 |-- humidity: number, percent
 |-- ph: number
 `-- tds: number, ppm
 
-pump/
+users/{uid}/pump/
 |-- command: "start" or "stop"
 `-- status: "on" or "off"
 
-usage/
+users/{uid}/usage/
 |-- waterUsed: number, liters
 `-- energyUsed: number, kWh
 ```
+
+## ESP32 Auth Setup
+
+In `ESP32/Contol/src/main.cpp`, edit these values before flashing:
+
+```cpp
+#define WIFI_SSID_1 "YourPrimaryWifi"
+#define WIFI_PASSWORD_1 "YourPrimaryPassword"
+#define WIFI_SSID_2 "YourBackupWifi"
+#define WIFI_PASSWORD_2 "YourBackupPassword"
+
+#define FIREBASE_USER_EMAIL "device-or-user@example.com"
+#define FIREBASE_USER_PASSWORD "YourFirebasePassword"
+#define CREATE_FIREBASE_ACCOUNT false
+#define FIREBASE_DATA_UID "paste-the-web-esp32-token-here"
+```
+
+Use `CREATE_FIREBASE_ACCOUNT true` only for the first flash when you want the ESP32 to create a new Email/Password Firebase user. Set it back to `false` after the account exists. Google login tokens expire, so do not paste a Google ID token into firmware; paste the stable `ESP32 token` UID shown by the web app.
+
+Example authenticated Realtime Database rules:
+
+```json
+{
+  "rules": {
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid"
+      }
+    }
+  }
+}
+```
+
+If the ESP32 signs in with a separate device account but writes to another user's `FIREBASE_DATA_UID`, adjust your Firebase rules to allow that device account for that user path.
 
 ## Default App Values
 
@@ -101,11 +137,11 @@ usage/
 
 | Sensor | Firebase path | Unit | Decimals | Default ideal range |
 | --- | --- | --- | --- | --- |
-| Soil Moisture | `sensors/moisture` | `%` | `0` | Uses selected crop |
-| Soil Temp | `sensors/temp` | `C` | `1` | Uses selected crop |
-| Air Humidity | `sensors/humidity` | `%` | `1` | `40-80` |
-| pH Level | `sensors/ph` | none | `1` | Uses selected crop |
-| Nutrients/TDS | `sensors/tds` | `ppm` | `0` | Uses selected crop |
+| Soil Moisture | `users/{uid}/sensors/moisture` | `%` | `0` | Uses selected crop |
+| Soil Temp | `users/{uid}/sensors/temp` | `C` | `1` | Uses selected crop |
+| Air Humidity | `users/{uid}/sensors/humidity` | `%` | `1` | `40-80` |
+| pH Level | `users/{uid}/sensors/ph` | none | `1` | Uses selected crop |
+| Nutrients/TDS | `users/{uid}/sensors/tds` | `ppm` | `0` | Uses selected crop |
 
 Each sensor starts with this default runtime state:
 
@@ -162,10 +198,10 @@ en, hi, bn, te, mr, ta, gu, ur, pa, as
 
 | Value | Meaning |
 | --- | --- |
-| `pump/command = "start"` | Request pump start |
-| `pump/command = "stop"` | Request pump stop |
-| `pump/status = "on"` | Pump is running |
-| `pump/status = "off"` | Pump is stopped |
+| `users/{uid}/pump/command = "start"` | Request pump start |
+| `users/{uid}/pump/command = "stop"` | Request pump stop |
+| `users/{uid}/pump/status = "on"` | Pump is running |
+| `users/{uid}/pump/status = "off"` | Pump is stopped |
 
 The app starts with pump state set to `false` until Firebase sends a status value.
 
@@ -173,18 +209,7 @@ The app starts with pump state set to `false` until Firebase sends a status valu
 
 - Do not commit private Wi-Fi passwords, personal emails, private Firebase rules, or service account files.
 - Firebase web config values are public identifiers, but this README uses placeholders so project-specific information is not exposed.
-- Use Firebase Authentication and database rules before production deployment.
-
-Example test-only database rules:
-
-```json
-{
-  "rules": {
-    ".read": "auth != null",
-    ".write": "auth != null"
-  }
-}
-```
+- Use Firebase Authentication and per-user database rules before production deployment.
 
 ## Deployment
 

@@ -33,13 +33,9 @@
                 <!-- Email Login Tab -->
                 <div id="email-tab" class="login-tab active">
                     <div class="provider-login">
-                        <button type="button" class="provider-btn" id="googleLoginBtn">
+                        <button type="button" class="provider-btn google-provider-btn" id="googleLoginBtn">
                             <i class="fa-brands fa-google"></i>
                             <span data-i18n="btn_google_login">Continue with Google</span>
-                        </button>
-                        <button type="button" class="provider-btn" id="microsoftLoginBtn">
-                            <i class="fa-brands fa-microsoft"></i>
-                            <span data-i18n="btn_microsoft_login">Continue with Microsoft</span>
                         </button>
                     </div>
 
@@ -61,6 +57,9 @@
                                 <i class="fa-solid fa-lock"></i>
                                 <input type="password" id="loginPassword" required placeholder="Enter password" data-i18n="login_password_placeholder">
                             </div>
+                            <div class="form-links">
+                                <button type="button" class="text-link" id="forgotPasswordLink" data-i18n="btn_forgot_password">Forgot password?</button>
+                            </div>
                         </div>
                         
                         <button type="submit" class="btn-primary btn-block">
@@ -74,7 +73,7 @@
                     
                     <form id="signupForm" class="login-form" style="display: none;">
                         <div class="auth-note">
-                            <span data-i18n="signup_provider_note">Create your farm account with email, or use Google/Microsoft above for faster access.</span>
+                            <span data-i18n="signup_provider_note">Create your farm account with email, or use Google above for faster access.</span>
                         </div>
 
                         <div class="form-group">
@@ -116,7 +115,7 @@
                         <i class="fa-solid fa-user-secret" style="font-size: 2rem; color: var(--secondary); margin-bottom: 1rem;"></i>
                         <h3 data-i18n="btn_guest_access">Guest Access</h3>
                         <p data-i18n="guest_access_desc">Use the app without creating an account. Limited features available.</p>
-                        <button id="guestLoginBtn" class="btn-primary btn-block" style="margin-top: 1.5rem;">
+                        <button type="button" id="guestLoginBtn" class="btn-primary btn-block" style="margin-top: 1.5rem;">
                             <i class="fa-solid fa-arrow-right"></i> <span data-i18n="btn_continue_guest">Continue as Guest</span>
                         </button>
                         <p class="auth-status" id="guestAuthStatus"></p>
@@ -134,6 +133,17 @@
             </div>
             
             <div class="header-controls">
+                <!-- Field Switcher -->
+                <div class="field-selector-container" id="fieldSelectorContainer" style="display: none;">
+                    <i class="fa-solid fa-mountain-sun"></i>
+                    <select id="fieldSelect">
+                        <!-- Loaded dynamically from Firebase -->
+                    </select>
+                    <button class="btn-add-field" id="btnAddFieldBtn" title="Add Field">
+                        <i class="fa-solid fa-plus"></i>
+                    </button>
+                </div>
+
                 <div class="lang-selector">
                     <i class="fa-solid fa-earth-asia"></i>
                     <select id="languageSelect">
@@ -150,6 +160,7 @@
                     </select>
                 </div>
                 <div class="time-display" id="clockDisplay">00:00:00</div>
+                <div class="anon-timer" id="anonTimerDisplay" style="display:none;">Guest account expires in 10:00</div>
                 <button class="icon-btn" id="logoutBtn" title="Logout" style="display:none;">
                     <i class="fa-solid fa-sign-out-alt"></i>
                 </button>
@@ -159,11 +170,164 @@
             </div>
         </header>
 
+
+        <!-- Modals -->
+        <div id="confirmModal" class="modal-overlay">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <i class="fa-solid fa-circle-question"></i>
+                    <h3 data-i18n="modal_confirm_title">Confirm Action</h3>
+                </div>
+                <div class="modal-body">
+                    <p id="confirmText">Are you sure you want to perform this action?</p>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn-secondary" id="btnCancelCmd" data-i18n="btn_cancel">Cancel</button>
+                    <button class="btn-primary" id="btnConfirmCmd" data-i18n="btn_confirm">Confirm</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="farmSettingsModal" class="modal-overlay">
+            <div class="modal-content settings-modal-content">
+                <div class="modal-header">
+                    <i class="fa-solid fa-gear"></i>
+                    <h3 data-i18n="modal_farm_settings_title">Farm Settings</h3>
+                </div>
+                <form id="farmSettingsForm" class="modal-form">
+                    <label>
+                        <span data-i18n="label_name">Farmer Name</span>
+                        <input type="text" id="settingsName" required placeholder="Enter name">
+                    </label>
+                    <label>
+                        <span data-i18n="label_field_name">Field Name</span>
+                        <input type="text" id="settingsFieldName" required placeholder="Enter field name">
+                    </label>
+                    <div class="modal-form-row">
+                        <label>
+                            <span data-i18n="label_field_size">Field Size</span>
+                            <input type="number" id="settingsFieldSize" required min="0.1" step="0.1" placeholder="0.0">
+                        </label>
+                        <label>
+                            <span data-i18n="label_unit">Unit</span>
+                            <select id="settingsFieldUnit" required>
+                                <option value="bigha" data-i18n="unit_bigha">Bigha</option>
+                                <option value="katha" data-i18n="unit_katha">Katha</option>
+                            </select>
+                        </label>
+                    </div>
+                    <label>
+                        <span data-i18n="label_crop_type">Target Crop</span>
+                        <select id="settingsCropType" required>
+                            <option value="rice" data-i18n="crop_rice">Rice</option>
+                            <option value="paddy" data-i18n="crop_paddy">Paddy</option>
+                            <option value="potato" data-i18n="crop_potato">Potato</option>
+                            <option value="vegetables" data-i18n="crop_vegetables">Vegetables</option>
+                            <option value="gehunu" data-i18n="crop_gehunu">Gehunu (Wheat)</option>
+                            <option value="tea" data-i18n="crop_tea">Tea</option>
+                            <option value="other" data-i18n="crop_other">Other</option>
+                        </select>
+                    </label>
+                    <div class="readonly-token" style="margin-top: 0.5rem; background: #f0f7f0; border: 2px dashed #2e7d32; padding: 12px; border-radius: 8px;">
+                        <span style="font-size: 0.85rem; color: var(--text-primary); font-weight: 700;">Device Token(microController): <strong id="settingsFieldEsp32TokenDisplay" style="display:block; font-family: monospace; color: #2e7d32; font-size: 0.95rem; margin-top: 0.25rem; word-break: break-all; user-select: all; cursor: pointer;">--</strong></span>
+                    </div>
+                    <div class="readonly-token" style="margin-top: 0.5rem;">
+                        <span data-i18n="info_field_id">Field ID:</span>
+                        <strong id="settingsActiveFieldId" style="user-select: all; cursor: pointer;">--</strong>
+                    </div>
+                    <div class="modal-danger-zone">
+                        <div class="danger-info-block">
+                            <strong data-i18n="label_account_delete">Account Delete</strong>
+                            <p id="settingsAnonTimerDisplay" style="display: none;"></p>
+                        </div>
+                        <div class="danger-actions">
+                            <button type="button" class="btn-secondary btn-danger" id="deleteAccountBtn" data-i18n="btn_delete_account">Delete Account</button>
+                        </div>
+                    </div>
+                    <div class="modal-danger-zone" style="margin-top: 0.75rem;">
+                        <div class="danger-info-block">
+                            <strong data-i18n="label_field_delete">Delete Field</strong>
+                            <p style="margin-top: 0.25rem; font-size: 0.8rem; line-height: 1.3;">Permanently remove this field and all sensor history.</p>
+                        </div>
+                        <div class="danger-actions">
+                            <button type="button" class="btn-secondary btn-danger" id="deleteFieldBtn" data-i18n="btn_delete_field">Delete Field</button>
+                        </div>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn-secondary" id="farmSettingsCancelBtn" data-i18n="btn_cancel">Cancel</button>
+                        <button type="submit" class="btn-primary" data-i18n="btn_save_settings">Save Settings</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Add Field Modal -->
+        <div id="addFieldModal" class="modal-overlay">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <i class="fa-solid fa-mountain-sun"></i>
+                    <h3 data-i18n="modal_add_field_title">Add New Field</h3>
+                </div>
+                <form id="addFieldForm" class="modal-form">
+                    <label>
+                        <span data-i18n="label_field_name">Field Name</span>
+                        <input type="text" id="newFieldName" placeholder="e.g. Rice field North" required>
+                    </label>
+                    <label>
+                        <span data-i18n="label_crop_type">Target Crop</span>
+                        <select id="newFieldCrop" required>
+                            <option value="rice" data-i18n="crop_rice">Rice</option>
+                            <option value="paddy" data-i18n="crop_paddy">Paddy</option>
+                            <option value="potato" data-i18n="crop_potato">Potato</option>
+                            <option value="vegetables" data-i18n="crop_vegetables">Vegetables</option>
+                            <option value="gehunu" data-i18n="crop_gehunu">Gehunu (Wheat)</option>
+                            <option value="tea" data-i18n="crop_tea">Tea</option>
+                            <option value="other" data-i18n="crop_other">Other</option>
+                        </select>
+                    </label>
+                    <div class="modal-form-row">
+                        <label>
+                            <span data-i18n="label_field_size">Field Size</span>
+                            <input type="number" id="newFieldSize" required min="0.1" step="0.1" placeholder="0.0">
+                        </label>
+                        <label>
+                            <span data-i18n="label_unit">Unit</span>
+                            <select id="newFieldUnit" required>
+                                <option value="bigha" data-i18n="unit_bigha">Bigha</option>
+                                <option value="katha" data-i18n="unit_katha">Katha</option>
+                            </select>
+                        </label>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button type="button" class="btn-secondary" id="btnAddFieldCancel" data-i18n="btn_cancel">Cancel</button>
+                        <button type="submit" class="btn-primary" data-i18n="btn_add_field">Add Field</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Confirmation Modal -->
+        <div id="confirmationModal" class="modal-overlay">
+            <div class="modal-content" style="max-width: 400px; text-align: center; border-top: 5px solid #fa5252;">
+                <div class="modal-header" style="justify-content: center; margin-bottom: 1rem;">
+                    <i class="fa-solid fa-circle-exclamation" style="font-size: 3rem; color: #fa5252; background: #fff5f5; padding: 0.8rem; border-radius: 16px;"></i>
+                </div>
+                <h3 style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem;" data-i18n="confirm_delete_title">Delete Field?</h3>
+                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem; line-height: 1.5;" id="confirmModalBody">Are you sure you want to delete this field? This will permanently delete all its sensor values and control history from the database.</p>
+                <div class="modal-actions" style="display: flex; gap: 0.75rem; justify-content: center;">
+                    <button type="button" class="btn-secondary" id="confirmCancelBtn" style="flex: 1;" data-i18n="btn_cancel">Cancel</button>
+                    <button type="button" class="btn-primary" id="confirmDeleteBtn" style="flex: 1; background: #fa5252; border-color: #fa5252; color: white;" data-i18n="btn_delete_field">Delete</button>
+                </div>
+            </div>
+        </div>
+
         <!-- ONBOARDING VIEW -->
-        <main id="onboarding-view" class="view active">
+        <main id="onboarding-view" class="view">
             <div class="onboarding-container card-panel">
                 <h2 data-i18n="onboarding_title">System Initialization</h2>
                 <p class="subtitle" data-i18n="onboarding_subtitle">Configure AI parameters for your sector</p>
+
 
                 <form id="onboardingForm" class="onboarding-form">
                     <div class="form-group">
@@ -208,6 +372,8 @@
                             </select>
                         </div>
                     </div>
+                    
+
 
                     <button type="submit" class="btn-primary mt-4">
                         <span data-i18n="btn_initialize">Start Farming</span>
@@ -218,16 +384,20 @@
         </main>
 
         <!-- DASHBOARD VIEW -->
-        <main id="dashboard-view" class="view">
-            
+        <main class="view" id="dashboard-view">
             <div class="dashboard-grid">
                 
                 <!-- Profile / Status Summary -->
                 <div class="card-panel profile-panel">
                     <div class="panel-header">
                         <h3 data-i18n="panel_system_status">System Status</h3>
-                        <div class="status-indicator online">
-                            <span class="pulse"></span> <span data-i18n="status_online">System Online</span>
+                        <div class="panel-actions">
+                            <button type="button" class="icon-btn panel-settings-btn" id="farmSettingsBtn" title="Farm Settings" aria-label="Farm Settings">
+                                <i class="fa-solid fa-gear"></i>
+                            </button>
+                            <div class="status-indicator online">
+                                <span class="pulse"></span> <span data-i18n="status_online">System Online</span>
+                            </div>
                         </div>
                     </div>
                     <div class="profile-info">
@@ -250,6 +420,10 @@
                         <div class="info-item">
                             <span class="label" data-i18n="info_energy_used">Energy Used:</span>
                             <span class="value" style="color:var(--warning)"><span id="dispEnergy">--</span> kWh</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="label" data-i18n="info_device_uid">ESP32 token:</span>
+                            <span class="value uid-value" id="dispFirebaseUid">--</span>
                         </div>
                     </div>
                 </div>
@@ -533,24 +707,6 @@
             </div>
         </main>
     </div>
-
-    <!-- Modals -->
-    <div id="confirmModal" class="modal-overlay">
-        <div class="modal-content">
-            <div class="modal-header">
-                <i class="fa-solid fa-circle-question"></i>
-                <h3 data-i18n="modal_confirm_title">Confirm Action</h3>
-            </div>
-            <div class="modal-body">
-                <p id="confirmText">Are you sure you want to execute this command?</p>
-            </div>
-            <div class="modal-actions">
-                <button class="btn-secondary" id="btnCancelCmd" data-i18n="btn_cancel">Cancel</button>
-                <button class="btn-primary btn-danger" style="box-shadow: none;" id="btnConfirmCmd" data-i18n="btn_execute">Execute</button>
-            </div>
-        </div>
-    </div>
-
     <script src="js/config.js"></script>
     <script src="js/i18n.js"></script>
     <script src="js/data.js"></script>
