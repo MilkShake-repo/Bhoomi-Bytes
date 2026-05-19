@@ -1,0 +1,22 @@
+{
+  "rules": {
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid",
+        "fields": {
+          "$fieldId": {
+            "devices": {
+              "$deviceId": {
+                "sensorData": {
+                  ".read": "auth != null && (auth.uid == $uid || root.child('users/' + $uid + '/fields/' + $fieldId + '/deviceRegistry/' + $deviceId).exists())",
+                  ".write": "auth != null && root.child('users/' + $uid + '/fields/' + $fieldId + '/deviceRegistry/' + $deviceId).exists()"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

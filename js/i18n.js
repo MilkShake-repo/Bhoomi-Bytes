@@ -51,7 +51,7 @@ const defaultTranslations = {
         info_crop: "Active Crop:",
         info_water_used: "Water Used:",
         info_energy_used: "Energy Used:",
-        info_device_uid: "ESP32 token:",
+        info_device_uid: "Device ID:",
         panel_weather: "Weather Data",
         weather_clear: "Clear Skies",
         weather_hot: "Scorching Heat",

@@ -228,8 +228,18 @@
                             <option value="other" data-i18n="crop_other">Other</option>
                         </select>
                     </label>
-                    <div class="readonly-token" style="margin-top: 0.5rem; background: #f0f7f0; border: 2px dashed #2e7d32; padding: 12px; border-radius: 8px;">
-                        <span style="font-size: 0.85rem; color: var(--text-primary); font-weight: 700;">Device Token(microController): <strong id="settingsFieldEsp32TokenDisplay" style="display:block; font-family: monospace; color: #2e7d32; font-size: 0.95rem; margin-top: 0.25rem; word-break: break-all; user-select: all; cursor: pointer;">--</strong></span>
+                    <label>
+                        <span>Active Device</span>
+                        <select id="settingsDeviceSelect"></select>
+                    </label>
+                    <div class="modal-form-row">
+                        <button type="button" class="btn-secondary" id="settingsAddDeviceBtn">
+                            <i class="fa-solid fa-plus"></i> Add Device
+                        </button>
+                        <div class="readonly-token">
+                            <span>Device ID:</span>
+                            <strong id="settingsFieldEsp32TokenDisplay">--</strong>
+                        </div>
                     </div>
                     <div class="readonly-token" style="margin-top: 0.5rem;">
                         <span data-i18n="info_field_id">Field ID:</span>
@@ -422,7 +432,7 @@
                             <span class="value" style="color:var(--warning)"><span id="dispEnergy">--</span> kWh</span>
                         </div>
                         <div class="info-item">
-                            <span class="label" data-i18n="info_device_uid">ESP32 token:</span>
+                            <span class="label" data-i18n="info_device_uid">Device ID:</span>
                             <span class="value uid-value" id="dispFirebaseUid">--</span>
                         </div>
                     </div>

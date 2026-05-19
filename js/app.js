@@ -26,13 +26,76 @@ const sensorConfigByKey = sensorConfigs.reduce((configs, sensor) => {
     return configs;
 }, {});
 
-function generateEsp32Token() {
-    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let token = 'tok_';
-    for (let i = 0; i < 16; i++) {
-        token += chars.charAt(Math.floor(Math.random() * chars.length));
+function normalizeFieldDevices(field) {
+    if (!field) return {};
+    const devices = {};
+    if (field.deviceRegistry && typeof field.deviceRegistry === 'object') {
+        Object.keys(field.deviceRegistry).forEach(deviceId => {
+            if (deviceId.startsWith('device_')) {
+                devices[deviceId] = {
+                    id: deviceId,
+                    name: field.deviceRegistry[deviceId].name || `Device ${deviceId.replace('device_', '')}`
+                };
+            }
+        });
     }
-    return token;
+    if (field.devices && typeof field.devices === 'object') {
+        Object.keys(field.devices).forEach(deviceId => {
+            if (deviceId.startsWith('device_') && !devices[deviceId]) {
+                devices[deviceId] = {
+                    id: deviceId,
+                    name: field.devices[deviceId].name || `Device ${deviceId.replace('device_', '')}`
+                };
+            }
+        });
+    }
+    const legacyDeviceId = field['deviceToken(microController)'] || field.deviceToken || field.esp32Token;
+    if (legacyDeviceId && !devices[legacyDeviceId]) {
+        devices[legacyDeviceId] = { id: legacyDeviceId, name: legacyDeviceId };
+    }
+    if (Object.keys(devices).length === 0) {
+        devices.device_1 = { id: 'device_1', name: 'Device 1' };
+    }
+    return devices;
+}
+
+function getActiveDeviceId() {
+    const activeField = appState.fields && appState.fields[appState.activeFieldId];
+    if (!activeField) return '';
+    const devices = normalizeFieldDevices(activeField);
+    const preferredId = activeField.activeDeviceId || activeField['deviceToken(microController)'] || activeField.deviceToken || activeField.esp32Token;
+    if (preferredId && devices[preferredId]) return preferredId;
+    return Object.keys(devices)[0] || '';
+}
+
+function getNextDeviceId(field) {
+    const devices = normalizeFieldDevices(field);
+    const numbers = Object.keys(devices).map(id => {
+        const match = id.match(/^device_(\d+)$/);
+        return match ? Number(match[1]) : 0;
+    });
+    return `device_${Math.max(0, ...numbers) + 1}`;
+}
+
+function createDefaultSensorData() {
+    return {
+        sensors: {
+            humidity: 45,
+            moisture: 30,
+            ph: 6.5,
+            tds: 450,
+            temp: 24
+        },
+        pump: {
+            status: 'off',
+            active: false,
+            lastSwitched: firebase.database.ServerValue.TIMESTAMP
+        },
+        usage: {
+            waterUsed: 0,
+            energyUsed: 0
+        }
+    };
 }
 
 function toPascalCase(value) {
@@ -76,7 +139,10 @@ function userDataPath(relativePath) {
     
     // Field-specific nodes (sensors, pump, usage, etc.)
     if (appState.activeFieldId) {
-        return `users/${appState.userId}/fields/${appState.activeFieldId}/devices/sensorData/${cleanPath}`;
+        const deviceId = getActiveDeviceId();
+        if (deviceId) {
+            return `users/${appState.userId}/fields/${appState.activeFieldId}/devices/${deviceId}/sensorData/${cleanPath}`;
+        }
     }
     
     return `users/${appState.userId}/${cleanPath}`;
@@ -264,16 +330,17 @@ function readFirebaseSensor(sensorName) {
     activeListeners.push(ref);
 }
 
-// Write pump command to Firebase
+// Write desired pump state to Firebase
 function sendPumpCommand(action) {
     if (!db) {
         console.error('Firebase not initialized');
         return;
     }
-    db.ref(userDataPath('pump/command')).set(action).then(() => {
+    const turnOn = action === 'start';
+    db.ref(userDataPath('pump/active')).set(turnOn).then(() => {
         showFarmAlert(`Pump ${action === 'start' ? 'start' : 'stop'} request sent.`, 'success', 'fa-circle-check');
     }).catch((err) => {
-        showFarmAlert(`Pump command failed: ${err.message}`, 'danger', 'fa-circle-exclamation');
+        showFarmAlert(`Pump update failed: ${err.message}`, 'danger', 'fa-circle-exclamation');
     });
 }
 
@@ -623,6 +690,8 @@ const settingsFieldName = document.getElementById('settingsFieldName');
 const settingsFieldSize = document.getElementById('settingsFieldSize');
 const settingsFieldUnit = document.getElementById('settingsFieldUnit');
 const settingsCropType = document.getElementById('settingsCropType');
+const settingsDeviceSelect = document.getElementById('settingsDeviceSelect');
+const settingsAddDeviceBtn = document.getElementById('settingsAddDeviceBtn');
 const settingsFieldEsp32TokenDisplay = document.getElementById('settingsFieldEsp32TokenDisplay');
 const settingsActiveFieldId = document.getElementById('settingsActiveFieldId');
 const anonTimerDisplay = document.getElementById('anonTimerDisplay');
@@ -688,12 +757,27 @@ function setText(id, text) {
 }
 
 function updateFirebaseUidDisplay() {
-    const defaultUid = appState.userId || '--';
-    const activeField = appState.fields && appState.fields[appState.activeFieldId];
-    const rawToken = activeField && (activeField['deviceToken(microController)'] || activeField.deviceToken || activeField.esp32Token);
-    const activeUid = (rawToken && rawToken.trim()) || defaultUid;
+    if (dispFirebaseUid) dispFirebaseUid.innerText = getActiveDeviceId() || '--';
+}
 
-    if (dispFirebaseUid) dispFirebaseUid.innerText = activeUid;
+function renderDeviceSettings(activeField) {
+    const devices = normalizeFieldDevices(activeField);
+    const activeDeviceId = getActiveDeviceId();
+
+    if (settingsDeviceSelect) {
+        settingsDeviceSelect.innerHTML = '';
+        Object.keys(devices).forEach(deviceId => {
+            const opt = document.createElement('option');
+            opt.value = deviceId;
+            opt.innerText = devices[deviceId].name || deviceId;
+            settingsDeviceSelect.appendChild(opt);
+        });
+        settingsDeviceSelect.value = activeDeviceId;
+    }
+
+    if (settingsFieldEsp32TokenDisplay) {
+        settingsFieldEsp32TokenDisplay.innerText = activeDeviceId || '--';
+    }
 }
 
 function updateFarmSummaryUI() {
@@ -734,10 +818,7 @@ function openFarmSettings() {
         settingsFieldName.value = 'Main Field';
     }
     
-    if (settingsFieldEsp32TokenDisplay) {
-        const rawToken = activeField && (activeField['deviceToken(microController)'] || activeField.deviceToken || activeField.esp32Token);
-        settingsFieldEsp32TokenDisplay.innerText = rawToken || '--';
-    }
+    renderDeviceSettings(activeField);
     
     if (settingsActiveFieldId) {
         settingsActiveFieldId.innerText = appState.activeFieldId || '--';
@@ -766,6 +847,42 @@ function setupFarmSettings() {
         });
     }
 
+    if (settingsDeviceSelect) {
+        settingsDeviceSelect.addEventListener('change', () => {
+            const activeField = appState.fields && appState.fields[appState.activeFieldId];
+            if (!activeField) return;
+            activeField.activeDeviceId = settingsDeviceSelect.value;
+            activeField['deviceToken(microController)'] = settingsDeviceSelect.value;
+            renderDeviceSettings(activeField);
+            updateFirebaseUidDisplay();
+        });
+    }
+
+    if (settingsAddDeviceBtn) {
+        settingsAddDeviceBtn.addEventListener('click', () => {
+            const activeField = appState.fields && appState.fields[appState.activeFieldId];
+            if (!activeField || !db || !appState.userId || !appState.activeFieldId) return;
+
+            const deviceId = getNextDeviceId(activeField);
+            const devices = normalizeFieldDevices(activeField);
+            devices[deviceId] = { id: deviceId, name: `Device ${deviceId.replace('device_', '')}` };
+            activeField.deviceRegistry = devices;
+            activeField.activeDeviceId = deviceId;
+            activeField['deviceToken(microController)'] = deviceId;
+
+            db.ref(`users/${appState.userId}/fields/${appState.activeFieldId}`).update({
+                deviceRegistry: devices,
+                activeDeviceId: deviceId,
+                'deviceToken(microController)': deviceId
+            });
+            db.ref(`users/${appState.userId}/fields/${appState.activeFieldId}/devices/${deviceId}/sensorData`).set(createDefaultSensorData());
+
+            renderDeviceSettings(activeField);
+            updateFarmSummaryUI();
+            showFarmAlert(`Added ${deviceId}.`, 'success', 'fa-circle-check');
+        });
+    }
+
     if (farmSettingsForm) {
         farmSettingsForm.addEventListener('submit', (event) => {
             event.preventDefault();
@@ -785,9 +902,8 @@ function setupFarmSettings() {
             }
 
             const activeField = appState.fields && appState.fields[appState.activeFieldId];
-            const rawOldToken = activeField && (activeField['deviceToken(microController)'] || activeField.deviceToken || activeField.esp32Token);
-            const oldToken = rawOldToken ? rawOldToken.trim() : '';
-            const customEsp32Token = oldToken;
+            const devices = normalizeFieldDevices(activeField);
+            const deviceId = (settingsDeviceSelect && settingsDeviceSelect.value) || getActiveDeviceId() || 'device_1';
 
             appState.user = farmerName;
             appState.fieldSize = fieldSize;
@@ -795,7 +911,9 @@ function setupFarmSettings() {
             appState.crop = settingsCropType.value;
 
             if (appState.fields && appState.fields[appState.activeFieldId]) {
-                appState.fields[appState.activeFieldId]['deviceToken(microController)'] = customEsp32Token;
+                appState.fields[appState.activeFieldId].deviceRegistry = devices;
+                appState.fields[appState.activeFieldId].activeDeviceId = deviceId;
+                appState.fields[appState.activeFieldId]['deviceToken(microController)'] = deviceId;
             }
             if (db && appState.userId) {
                 db.ref(`users/${appState.userId}/profile`).update({
@@ -815,7 +933,9 @@ function setupFarmSettings() {
                     crop: appState.crop,
                     fieldSize: appState.fieldSize,
                     unit: appState.unit,
-                    'deviceToken(microController)': customEsp32Token
+                    deviceRegistry: devices,
+                    activeDeviceId: deviceId,
+                    'deviceToken(microController)': deviceId
                 };
                 
                 detachFirebaseListeners();
@@ -876,9 +996,6 @@ function setupFarmSettings() {
                 return;
             }
 
-            const activeField = appState.fields[activeFieldId];
-            const esp32Token = activeField.esp32Token ? activeField.esp32Token.trim() : '';
-
             // Disable button during delete
             confirmDeleteBtn.disabled = true;
             confirmDeleteBtn.innerText = 'Deleting...';
@@ -929,14 +1046,7 @@ function setupFarmSettings() {
             };
 
             if (db) {
-                // 1. Delete metadata
                 db.ref(`users/${appState.userId}/fields/${activeFieldId}`).remove()
-                    .then(() => {
-                        // 2. Delete custom token path if applicable and different
-                        if (esp32Token && esp32Token !== appState.userId) {
-                            return db.ref(`users/${esp32Token}/fields/${activeFieldId}`).remove();
-                        }
-                    })
                     .then(() => {
                         cleanupAndClose();
                     })
@@ -970,42 +1080,125 @@ function deleteAccount() {
         return;
     }
 
-    const confirmed = window.confirm('Delete this Firebase account permanently? This also clears farm setup, sensor cache, pump status, and usage data. You cannot undo this.');
+    const confirmed = window.confirm('Delete this account permanently?\n\nThis will remove your farm setup, all sensor history, pump data, and usage records. This cannot be undone.');
     if (!confirmed) return;
 
     setAccountDangerButtonsLoading(true, deleteAccountBtn, 'Deleting...');
 
     const user = auth.currentUser;
     const userStateKey = getAppStateKey(appState.userId);
-    const deleteAuthUser = () => {
-        user.delete()
-            .then(() => {
-                localStorage.removeItem(userStateKey);
-                clearAuthSession();
-                appState = createDefaultAppState();
-                location.reload();
-            })
-            .catch((error) => {
-                setAccountDangerButtonsLoading(false, deleteAccountBtn);
-                if (error.code === 'auth/requires-recent-login') {
-                    showFarmAlert('Please log out, sign in again, then delete the account.', 'warn', 'fa-key');
-                } else {
-                    showFarmAlert(`Account delete failed: ${error.message}`, 'danger', 'fa-circle-exclamation');
-                }
-            });
+
+    const cleanupAndReload = () => {
+        localStorage.removeItem(userStateKey);
+        clearAuthSession();
+        appState = createDefaultAppState();
+        location.reload();
     };
 
-    if (!db) {
-        deleteAuthUser();
-        return;
-    }
+    const deleteAuthUser = () => {
+        return user.delete();
+    };
 
-    db.ref(`users/${appState.userId}`).remove()
-        .then(deleteAuthUser)
-        .catch((error) => {
+    const performDeletion = () => {
+        if (!db) {
+            return deleteAuthUser();
+        }
+
+        // 1. Send reset command to all devices
+        const updates = {};
+        if (appState.fields) {
+            Object.keys(appState.fields).forEach(fieldId => {
+                const field = appState.fields[fieldId];
+                const devices = field.deviceRegistry || {};
+                Object.keys(devices).forEach(deviceId => {
+                    updates[`users/${appState.userId}/fields/${fieldId}/devices/${deviceId}/sensorData/device/reset`] = true;
+                });
+            });
+        }
+
+        let initialPromise = Promise.resolve();
+        if (Object.keys(updates).length > 0) {
+            setAccountDangerButtonsLoading(true, deleteAccountBtn, 'Signaling devices...');
+            initialPromise = db.ref().update(updates).then(() => {
+                return new Promise(resolve => setTimeout(resolve, 5000)); // Give ESP32 time to receive
+            }).catch(err => {
+                console.warn("Failed to signal ESP32 devices:", err);
+            });
+        }
+
+        return initialPromise
+            .then(() => {
+                setAccountDangerButtonsLoading(true, deleteAccountBtn, 'Deleting...');
+                return db.ref(`users/${appState.userId}`).remove();
+            })
+            .then(() => deleteAuthUser());
+    };
+
+    const handleDeletionSuccess = () => {
+        cleanupAndReload();
+    };
+
+    const handleDeletionError = (err) => {
+        if (err.code === 'auth/requires-recent-login') {
+            reauthAndDelete();
+        } else {
             setAccountDangerButtonsLoading(false, deleteAccountBtn);
-            showFarmAlert(`Account data delete failed: ${error.message}`, 'danger', 'fa-circle-exclamation');
-        });
+            showFarmAlert(`Account delete failed: ${err.message}`, 'danger', 'fa-circle-exclamation');
+        }
+    };
+
+    const reauthAndDelete = () => {
+        const providerData = user.providerData;
+        const isGoogle    = providerData && providerData.some(p => p.providerId === 'google.com');
+        const isEmail     = providerData && providerData.some(p => p.providerId === 'password');
+        const isAnon      = user.isAnonymous;
+
+        if (isAnon) {
+            performDeletion().then(handleDeletionSuccess).catch(err => {
+                setAccountDangerButtonsLoading(false, deleteAccountBtn);
+                showFarmAlert(`Delete failed: ${err.message}`, 'danger', 'fa-circle-exclamation');
+            });
+            return;
+        }
+
+        if (isGoogle) {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            user.reauthenticateWithPopup(provider)
+                .then(() => performDeletion())
+                .then(handleDeletionSuccess)
+                .catch(err => {
+                    setAccountDangerButtonsLoading(false, deleteAccountBtn);
+                    showFarmAlert(`Re-authentication failed: ${err.message}`, 'danger', 'fa-circle-exclamation');
+                });
+            return;
+        }
+
+        if (isEmail) {
+            const password = window.prompt('Enter your current password to confirm account deletion:');
+            if (!password) {
+                setAccountDangerButtonsLoading(false, deleteAccountBtn);
+                return;
+            }
+            const credential = firebase.auth.EmailAuthProvider.credential(user.email, password);
+            user.reauthenticateWithCredential(credential)
+                .then(() => performDeletion())
+                .then(handleDeletionSuccess)
+                .catch(err => {
+                    setAccountDangerButtonsLoading(false, deleteAccountBtn);
+                    if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+                        showFarmAlert('Incorrect password. Account not deleted.', 'danger', 'fa-key');
+                    } else {
+                        showFarmAlert(`Delete failed: ${err.message}`, 'danger', 'fa-circle-exclamation');
+                    }
+                });
+            return;
+        }
+
+        setAccountDangerButtonsLoading(false, deleteAccountBtn);
+        showFarmAlert('Please log out, sign back in, then try deleting again.', 'warn', 'fa-key');
+    };
+
+    performDeletion().then(handleDeletionSuccess).catch(handleDeletionError);
 }
 
 function refreshDynamicTranslations(lang = appState.lang) {
@@ -1337,7 +1530,7 @@ onboardingForm.addEventListener('submit', (e) => {
     const unit = document.getElementById('fieldUnit').value;
     const crop = document.getElementById('cropType').value;
     
-    const onboardingEsp32Token = generateEsp32Token();
+    const onboardingDeviceId = 'device_1';
 
     appState.fieldSize = size;
     appState.unit = unit;
@@ -1352,31 +1545,19 @@ onboardingForm.addEventListener('submit', (e) => {
         crop: crop,
         fieldSize: size,
         unit: unit,
-        'deviceToken(microController)': onboardingEsp32Token
+        deviceRegistry: {
+            [onboardingDeviceId]: { id: onboardingDeviceId, name: 'Device 1' }
+        },
+        activeDeviceId: onboardingDeviceId,
+        'deviceToken(microController)': onboardingDeviceId
     };
 
     if (db && appState.userId) {
-        const defaultSensorData = {
-            sensors: {
-                humidity: 45,
-                moisture: 30,
-                ph: 6.5,
-                tds: 450,
-                temp: 24
-            },
-            pump: {
-                active: false,
-                lastSwitched: firebase.database.ServerValue.TIMESTAMP
-            },
-            usage: {
-                waterUsed: 0,
-                energyUsed: 0
-            }
-        };
+        const defaultSensorData = createDefaultSensorData();
 
         Promise.all([
             db.ref(`users/${appState.userId}/fields/${fieldId}`).set(newField),
-            db.ref(`users/${appState.userId}/fields/${fieldId}/devices/sensorData`).set(defaultSensorData)
+            db.ref(`users/${appState.userId}/fields/${fieldId}/devices/${onboardingDeviceId}/sensorData`).set(defaultSensorData)
         ]).then(() => {
             saveAppState();
             loadFieldsList();
@@ -1590,7 +1771,7 @@ if (addFieldForm) {
         const size = Number(document.getElementById('newFieldSize').value);
         const unit = document.getElementById('newFieldUnit').value;
         
-        const esp32Token = generateEsp32Token();
+            const deviceId = 'device_1';
         
         if (!name) {
             showFarmAlert('Please enter a field name.', 'warn', 'fa-triangle-exclamation');
@@ -1620,34 +1801,22 @@ if (addFieldForm) {
             crop: crop,
             fieldSize: size,
             unit: unit,
-            'deviceToken(microController)': esp32Token
+            deviceRegistry: {
+                [deviceId]: { id: deviceId, name: 'Device 1' }
+            },
+            activeDeviceId: deviceId,
+            'deviceToken(microController)': deviceId
         };
         
         if (db && appState.userId) {
             detachFirebaseListeners();
             appState.activeFieldId = fieldId;
 
-            const defaultSensorData = {
-                sensors: {
-                    humidity: 45,
-                    moisture: 30,
-                    ph: 6.5,
-                    tds: 450,
-                    temp: 24
-                },
-                pump: {
-                    active: false,
-                    lastSwitched: firebase.database.ServerValue.TIMESTAMP
-                },
-                usage: {
-                    waterUsed: 0,
-                    energyUsed: 0
-                }
-            };
+            const defaultSensorData = createDefaultSensorData();
 
             Promise.all([
                 db.ref(`users/${appState.userId}/fields/${fieldId}`).set(newField),
-                db.ref(`users/${appState.userId}/fields/${fieldId}/devices/sensorData`).set(defaultSensorData)
+                db.ref(`users/${appState.userId}/fields/${fieldId}/devices/${deviceId}/sensorData`).set(defaultSensorData)
             ]).then(() => {
                 if (addFieldModal) addFieldModal.classList.remove('active');
                 showFarmAlert(`Added and switched to field: ${name}`, 'success', 'fa-circle-check');
@@ -1931,13 +2100,13 @@ let pendingAction = null;
 
 btnStart.addEventListener('click', () => {
     pendingAction = 'start';
-    document.getElementById('confirmText').innerText = "Initiate remote command to START WATER PUMP via controller?";
+    document.getElementById('confirmText').innerText = "Set pump active to START WATER PUMP via controller?";
     modal.classList.add('active');
 });
 
 btnStop.addEventListener('click', () => {
     pendingAction = 'stop';
-    document.getElementById('confirmText').innerText = "Initiate remote command to STOP WATER PUMP via controller?";
+    document.getElementById('confirmText').innerText = "Set pump active to STOP WATER PUMP via controller?";
     modal.classList.add('active');
 });
 
@@ -1965,7 +2134,7 @@ function executePumpCmd(action) {
 
     showFarmAlert(`Sending pump ${action} request to the controller.`, 'info', 'fa-satellite-dish');
 
-    // Send command via Firebase to ESP32
+    // Send desired pump state via Firebase to ESP32
     sendPumpCommand(action);
 
     // Status will be updated via Firebase listener (listenPumpStatus)

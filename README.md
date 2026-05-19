@@ -1,6 +1,6 @@
 # Bhoomi Bytes
 
-Bhoomi Bytes is a smart farm monitoring dashboard for viewing live sensor readings, checking weather, managing crop threshold defaults, and sending irrigation pump commands through Firebase Realtime Database.
+Bhoomi Bytes is a smart farm monitoring dashboard for viewing live sensor readings, checking weather, managing crop threshold defaults, and controlling irrigation pump state through Firebase Realtime Database.
 
 This README avoids personal project credentials. Replace every placeholder value with your own Firebase and hosting details before deploying.
 
@@ -10,7 +10,7 @@ This README avoids personal project credentials. Replace every placeholder value
 - 10 minute inactive-session timeout
 - Authenticated per-user dashboard for soil moisture, soil temperature, air humidity, pH, and TDS nutrients
 - Crop-specific default values with editable overrides
-- Pump start/stop commands through Firebase
+- Pump start/stop control through Firebase
 - Water and energy usage summary
 - Weather and 7 day forecast using Open-Meteo
 - Multi-language UI support
@@ -59,44 +59,42 @@ Enable these Firebase Authentication providers as needed:
 - Anonymous
 - Google
 
-The web app shows an `ESP32 token` after login. This value is the user's stable Firebase UID and is used by the ESP32 as the database owner path.
+The web app shows the active field's `Device ID` and the settings modal shows the `Field ID`. Provide your Bhoomi account Email and Password, the target Field ID, and the Device ID in the ESP32 configuration portal.
 
 ## Firebase Database Paths
 
 ```text
-users/{uid}/sensors/
+users/{uid}/fields/{fieldId}/devices/{deviceId}/sensorData/sensors/
 |-- moisture: number, percent
 |-- temp: number, Celsius
 |-- humidity: number, percent
 |-- ph: number
 `-- tds: number, ppm
 
-users/{uid}/pump/
-|-- command: "start" or "stop"
+users/{uid}/fields/{fieldId}/devices/{deviceId}/sensorData/pump/
+|-- active: true or false
 `-- status: "on" or "off"
 
-users/{uid}/usage/
+users/{uid}/fields/{fieldId}/devices/{deviceId}/sensorData/usage/
 |-- waterUsed: number, liters
 `-- energyUsed: number, kWh
 ```
 
 ## ESP32 Auth Setup
 
-In `ESP32/Contol/src/main.cpp`, edit these values before flashing:
+In `ESP32/Contol/src/config_defaults.h`, edit these values before flashing, or enter them through the ESP32 configuration portal:
 
 ```cpp
-#define WIFI_SSID_1 "YourPrimaryWifi"
-#define WIFI_PASSWORD_1 "YourPrimaryPassword"
-#define WIFI_SSID_2 "YourBackupWifi"
-#define WIFI_PASSWORD_2 "YourBackupPassword"
-
-#define FIREBASE_USER_EMAIL "device-or-user@example.com"
-#define FIREBASE_USER_PASSWORD "YourFirebasePassword"
-#define CREATE_FIREBASE_ACCOUNT false
-#define FIREBASE_DATA_UID "paste-the-web-esp32-token-here"
+#define DEFAULT_WIFI_SSID_1 "YourPrimaryWifi"
+#define DEFAULT_WIFI_PASSWORD_1 "YourPrimaryPassword"
+#define DEFAULT_WIFI_SSID_2 "YourBackupWifi"
+#define DEFAULT_WIFI_PASSWORD_2 "YourBackupPassword"
+#define DEFAULT_FIREBASE_DATA_UID "paste-the-web-firebase-uid-here"
+#define DEFAULT_FIREBASE_DATA_FIELD_ID "field_1"
+#define DEFAULT_FIREBASE_DEVICE_TOKEN "device_1"
 ```
 
-Use `CREATE_FIREBASE_ACCOUNT true` only for the first flash when you want the ESP32 to create a new Email/Password Firebase user. Set it back to `false` after the account exists. Google login tokens expire, so do not paste a Google ID token into firmware; paste the stable `ESP32 token` UID shown by the web app.
+The ESP32 signs in with Email/Password and uses its internally acquired UID, Field ID, and friendly Device ID such as `device_1`.
 
 Example authenticated Realtime Database rules:
 
@@ -106,14 +104,26 @@ Example authenticated Realtime Database rules:
     "users": {
       "$uid": {
         ".read": "auth != null && auth.uid == $uid",
-        ".write": "auth != null && auth.uid == $uid"
+        ".write": "auth != null && auth.uid == $uid",
+        "fields": {
+          "$fieldId": {
+            "devices": {
+              "$deviceId": {
+                "sensorData": {
+                  ".read": "auth != null && (auth.uid == $uid || root.child('users/' + $uid + '/fields/' + $fieldId + '/deviceRegistry/' + $deviceId).exists())",
+                  ".write": "auth != null && root.child('users/' + $uid + '/fields/' + $fieldId + '/deviceRegistry/' + $deviceId).exists()"
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
 }
 ```
 
-If the ESP32 signs in with a separate device account but writes to another user's `FIREBASE_DATA_UID`, adjust your Firebase rules to allow that device account for that user path.
+Because the ESP32 signs in anonymously and writes to the dashboard user's UID path, your Firebase rules must allow that device account or otherwise allow the controller writes you expect.
 
 ## Default App Values
 
@@ -194,14 +204,14 @@ Available language codes:
 en, hi, bn, te, mr, ta, gu, ur, pa, as
 ```
 
-## Pump Command Defaults
+## Pump State Defaults
 
 | Value | Meaning |
 | --- | --- |
-| `users/{uid}/pump/command = "start"` | Request pump start |
-| `users/{uid}/pump/command = "stop"` | Request pump stop |
-| `users/{uid}/pump/status = "on"` | Pump is running |
-| `users/{uid}/pump/status = "off"` | Pump is stopped |
+| `users/{uid}/fields/{fieldId}/devices/{deviceId}/sensorData/pump/active = true` | Request pump start |
+| `users/{uid}/fields/{fieldId}/devices/{deviceId}/sensorData/pump/active = false` | Request pump stop |
+| `users/{uid}/fields/{fieldId}/devices/{deviceId}/sensorData/pump/status = "on"` | Pump is running |
+| `users/{uid}/fields/{fieldId}/devices/{deviceId}/sensorData/pump/status = "off"` | Pump is stopped |
 
 The app starts with pump state set to `false` until Firebase sends a status value.
 
