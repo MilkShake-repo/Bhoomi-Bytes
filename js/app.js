@@ -260,8 +260,12 @@ function googleLogin() {
 
     auth.signInWithPopup(provider)
         .catch((error) => {
+            if (error.code === 'auth/popup-blocked' || error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+                setAuthStatus('Popup was blocked. Redirecting to Google...');
+                return auth.signInWithRedirect(provider);
+            }
             clearAuthSession();
-            setAuthStatus('Login failed: ' + error.message, 'error');
+            setAuthStatus('Google login failed: ' + error.message, 'error');
             console.error('Google login failed:', error);
         })
         .finally(() => {
@@ -408,7 +412,10 @@ function createDefaultAppState() {
         isGuest: false,
         cropOverrides: {},
         fields: {},
-        activeFieldId: null
+        activeFieldId: null,
+        activeSection: 'home',
+        weatherLocation: null,
+        pumpTimerEndsAt: null
     };
 }
 
@@ -642,11 +649,13 @@ let sensorStatusKeys = {};
 let currentAiRecKey = 'ai_rec_normal';
 
 let charts = {};
+let liveSensorChart = null;
 let chartsInitialized = false;
 let dashboardTimer = null;
 let weatherIntervalId = null;
 let firebaseListenersStarted = false;
 let pendingDisplayName = null;
+let pumpTimerInterval = null;
 let currentWeatherState = {
     temp: null,
     rain: null,
@@ -697,6 +706,16 @@ const settingsActiveFieldId = document.getElementById('settingsActiveFieldId');
 const anonTimerDisplay = document.getElementById('anonTimerDisplay');
 const settingsAnonTimerDisplay = document.getElementById('settingsAnonTimerDisplay');
 const deleteAccountBtn = document.getElementById('deleteAccountBtn');
+const bottomNav = document.getElementById('bottomNav');
+const weatherEditBtn = document.getElementById('weatherEditBtn');
+const weatherAutoBtn = document.getElementById('weatherAutoBtn');
+const weatherSearchForm = document.getElementById('weatherSearchForm');
+const weatherLocationInput = document.getElementById('weatherLocationInput');
+const weatherSearchStatus = document.getElementById('weatherSearchStatus');
+const btnSetPumpTimer = document.getElementById('btnSetPumpTimer');
+const btnCancelPumpTimer = document.getElementById('btnCancelPumpTimer');
+const pumpTimerMinutes = document.getElementById('pumpTimerMinutes');
+const pumpTimerStatus = document.getElementById('pumpTimerStatus');
 
 // Add Field Modal & Dropdown Switcher
 const addFieldModal = document.getElementById('addFieldModal');
@@ -751,6 +770,55 @@ function renderConfigDrivenUI() {
     renderSensorCards();
 }
 
+function getCropDisplayName(cropKey = appState.crop) {
+    const crop = appConfig.crops[cropKey] || appConfig.crops.other;
+    const translated = getTranslation(appState.lang, `crop_${cropKey}`);
+    if (translated && translated !== `crop_${cropKey}`) return translated;
+    return crop.name || toPascalCase(cropKey || 'crop');
+}
+
+function applyCropTheme() {
+    const theme = appState.crop || 'paddy';
+    document.body.dataset.cropTheme = theme;
+    const chip = document.getElementById('activeCropChip');
+    if (chip) chip.innerText = getCropDisplayName(theme);
+}
+
+function setActiveSection(section = 'home') {
+    appState.activeSection = section;
+    document.querySelectorAll('.dashboard-section').forEach((panel) => {
+        panel.classList.toggle('section-active', panel.dataset.section === section);
+    });
+    document.querySelectorAll('.bottom-nav-item').forEach((button) => {
+        button.classList.toggle('active', button.dataset.targetSection === section);
+    });
+    saveAppState();
+    
+    // Force Chart.js to resize when sections switch to avoid 0-width rendering bugs
+    setTimeout(() => {
+        window.dispatchEvent(new Event('resize'));
+        if (liveSensorChart) {
+            try { liveSensorChart.resize(); } catch (e) { console.warn(e); }
+        }
+        if (charts) {
+            Object.keys(charts).forEach(key => {
+                if (charts[key]) {
+                    try { charts[key].resize(); } catch (e) { console.warn(e); }
+                }
+            });
+        }
+    }, 50);
+}
+
+function setupBottomNavigation() {
+    if (!bottomNav) return;
+    bottomNav.addEventListener('click', (event) => {
+        const button = event.target.closest('.bottom-nav-item');
+        if (!button) return;
+        setActiveSection(button.dataset.targetSection || 'home');
+    });
+}
+
 function setText(id, text) {
     const element = document.getElementById(id);
     if (element) element.innerText = text;
@@ -794,11 +862,12 @@ function updateFarmSummaryUI() {
         const cropElement = document.getElementById('dispCrop');
         if (cropElement) {
             cropElement.setAttribute('data-i18n', cropNameKey);
-            cropElement.innerText = getTranslation(appState.lang, cropNameKey);
+            cropElement.innerText = getCropDisplayName(appState.crop);
         }
     }
 
     updateFirebaseUidDisplay();
+    applyCropTheme();
 }
 
 function openFarmSettings() {
@@ -1306,6 +1375,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupLoginEvents();
     setupCropSettings();
     setupFarmSettings();
+    setupBottomNavigation();
+    setupWeatherControls();
+    setupPumpTimerControls();
+
+    // AI recommendation time to time after 30 minutes
+    setInterval(() => {
+        runAILogic(getCurrentCropConfig());
+    }, 30 * 60 * 1000);
 });
 
 // Check authentication state
@@ -1389,6 +1466,8 @@ function showLoginView() {
     mainHeader.style.display = 'none';
     onboardingView.classList.remove('active');
     dashboardView.classList.remove('active');
+    document.body.classList.remove('dashboard-ready');
+    if (bottomNav) bottomNav.classList.remove('visible');
     setGuestLoginLoading(false);
     setProviderButtonsLoading(false);
     setAuthStatus('');
@@ -1603,12 +1682,16 @@ function showDashboard() {
         onboardingView.classList.add('active');
         dashboardView.classList.remove('active');
         if (fieldSelectorContainer) fieldSelectorContainer.style.display = 'none';
+        document.body.classList.remove('dashboard-ready');
+        if (bottomNav) bottomNav.classList.remove('visible');
         return;
     }
     
     dashboardTimer = setTimeout(() => {
         onboardingView.classList.remove('active');
         dashboardView.classList.add('active');
+        document.body.classList.add('dashboard-ready');
+        if (bottomNav) bottomNav.classList.add('visible');
         dashboardTimer = null;
 
         if (!chartsInitialized) {
@@ -1616,9 +1699,12 @@ function showDashboard() {
             chartsInitialized = true;
         }
         
+        applyCropTheme();
+        setActiveSection(appState.activeSection || 'home');
         updateFarmSummaryUI();
         updateUsageSummary();
         loadCropSettingsForm();
+        restorePumpTimer();
         fetchWeather(); // Initial fetch
 
         // Setup Firebase listeners for sensors and pump
@@ -1717,6 +1803,7 @@ function switchField(fieldId) {
     updateFarmSummaryUI();
     loadCropSettingsForm();
     runAILogic(getCurrentCropConfig());
+    applyCropTheme();
     
     // Re-attach listeners on new paths
     if (db) {
@@ -1874,10 +1961,57 @@ function initCharts() {
     sensorConfigs.forEach((sensor) => {
         charts[sensor.key] = createChart(sensor.chartCanvasId, sensor.chartColor, sensor.chartFill);
     });
+
+    const liveCanvas = document.getElementById('chartLiveSensors');
+    if (liveCanvas) {
+        liveSensorChart = new Chart(liveCanvas.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: sensorConfigs.map((sensor) => ({
+                    label: sensor.fallbackLabel,
+                    data: [],
+                    borderColor: sensor.chartColor,
+                    backgroundColor: sensor.chartFill,
+                    fill: false,
+                    tension: 0.38,
+                    borderWidth: 3,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
+                }))
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            usePointStyle: true,
+                            boxWidth: 8,
+                            color: '#64748b',
+                            font: { weight: 'bold' }
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: '#94a3b8', maxTicksLimit: 6 } },
+                    y: { beginAtZero: true, grid: { color: 'rgba(148, 163, 184, 0.18)' }, ticks: { color: '#94a3b8' } }
+                }
+            }
+        });
+    }
 }
 
 // WEATHER API LOGIC (Open-Meteo)
 function fetchWeather() {
+    if (appState.weatherLocation && Number.isFinite(appState.weatherLocation.lat) && Number.isFinite(appState.weatherLocation.lon)) {
+        setText('wLocation', appState.weatherLocation.name || 'Saved Location');
+        callWeatherApi(appState.weatherLocation.lat, appState.weatherLocation.lon);
+        return;
+    }
+
     // Attempt Geolocation first
     if ("geolocation" in navigator) {
         navigator.geolocation.getCurrentPosition(
@@ -1896,6 +2030,66 @@ function fetchWeather() {
     } else {
         document.getElementById('wLocation').innerText = "New Delhi, India (Default)";
         callWeatherApi(28.61, 77.20);
+    }
+}
+
+function setupWeatherControls() {
+    if (weatherEditBtn && weatherSearchForm) {
+        weatherEditBtn.addEventListener('click', () => {
+            weatherSearchForm.hidden = !weatherSearchForm.hidden;
+            if (!weatherSearchForm.hidden && weatherLocationInput) {
+                weatherLocationInput.focus();
+            }
+        });
+    }
+
+    if (weatherAutoBtn) {
+        weatherAutoBtn.addEventListener('click', () => {
+            appState.weatherLocation = null;
+            saveAppState();
+            if (weatherSearchStatus) weatherSearchStatus.innerText = 'Using automatic location when available.';
+            fetchWeather();
+        });
+    }
+
+    if (weatherSearchForm) {
+        weatherSearchForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const query = weatherLocationInput ? weatherLocationInput.value.trim() : '';
+            if (!query) {
+                if (weatherSearchStatus) weatherSearchStatus.innerText = 'Enter a location first.';
+                return;
+            }
+            await searchWeatherLocation(query);
+        });
+    }
+}
+
+async function searchWeatherLocation(query) {
+    if (weatherSearchStatus) weatherSearchStatus.innerText = 'Searching location...';
+    try {
+        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=en&format=json`;
+        const response = await fetch(url);
+        const data = await response.json();
+        const result = data.results && data.results[0];
+        if (!result) {
+            if (weatherSearchStatus) weatherSearchStatus.innerText = 'No matching place found.';
+            return;
+        }
+
+        const locationName = [result.name, result.admin1, result.country].filter(Boolean).join(', ');
+        appState.weatherLocation = {
+            name: locationName,
+            lat: Number(result.latitude),
+            lon: Number(result.longitude)
+        };
+        saveAppState();
+        setText('wLocation', locationName);
+        if (weatherSearchStatus) weatherSearchStatus.innerText = `Weather set to ${locationName}.`;
+        callWeatherApi(appState.weatherLocation.lat, appState.weatherLocation.lon);
+    } catch (error) {
+        console.error('Location search failed:', error);
+        if (weatherSearchStatus) weatherSearchStatus.innerText = 'Location search failed. Try again.';
     }
 }
 
@@ -1926,7 +2120,7 @@ function updateWeatherUI(data) {
 
     document.getElementById('wTemp').innerText = Math.round(current.temperature_2m);
     document.getElementById('wDesc').innerText = wmo.desc;
-    document.getElementById('wMainIcon').className = `fa-solid ${wmo.icon} weather-icon-main`;
+    document.getElementById('wMainIcon').className = `fa-solid ${wmo.icon} weather-icon-huge`;
 
     document.getElementById('wRain').innerText = current.precipitation;
     document.getElementById('wWind').innerText = current.wind_speed_10m;
@@ -2011,7 +2205,19 @@ function updateSensorUI(key, val, idealRange, decimals = 1) {
         trendSpan.className = `trend ${trendClass}`;
         trendSpan.innerHTML = `<i class="fa-solid ${iconClass}"></i>`;
         interpSpan.innerText = getTranslation(appState.lang, interpKey);
+        updateLiveSensorChart();
     }
+}
+
+function updateLiveSensorChart() {
+    if (!liveSensorChart) return;
+    const maxLength = Math.max(1, ...sensorConfigs.map((sensor) => sensors[sensor.key].history.length));
+    liveSensorChart.data.labels = Array.from({ length: maxLength }, (_, index) => `${index + 1}`);
+    liveSensorChart.data.datasets.forEach((dataset, index) => {
+        const sensor = sensorConfigs[index];
+        dataset.data = sensors[sensor.key].history.slice(-maxLength);
+    });
+    liveSensorChart.update('none');
 }
 
 function resetSensorUI(key) {
@@ -2029,6 +2235,7 @@ function resetSensorUI(key) {
         charts[key].data.datasets[0].data = [];
         charts[key].update();
     }
+    updateLiveSensorChart();
 
     if (!card) return;
 
@@ -2141,6 +2348,69 @@ function executePumpCmd(action) {
     // No need for timeout simulation - ESP32 will update pump/status
 }
 
+function setupPumpTimerControls() {
+    if (btnSetPumpTimer) {
+        btnSetPumpTimer.addEventListener('click', () => {
+            const minutes = Number(pumpTimerMinutes ? pumpTimerMinutes.value : 0);
+            if (!Number.isFinite(minutes) || minutes < 1) {
+                showFarmAlert('Set the pump timer to at least 1 minute.', 'warn', 'fa-clock');
+                return;
+            }
+            appState.pumpTimerEndsAt = Date.now() + (minutes * 60 * 1000);
+            saveAppState();
+            restorePumpTimer();
+            showFarmAlert(`Pump will stop automatically in ${minutes} minute${minutes === 1 ? '' : 's'}.`, 'success', 'fa-clock');
+        });
+    }
+
+    if (btnCancelPumpTimer) {
+        btnCancelPumpTimer.addEventListener('click', () => {
+            cancelPumpTimer('Timer cancelled.');
+        });
+    }
+}
+
+function restorePumpTimer() {
+    if (pumpTimerInterval) {
+        clearInterval(pumpTimerInterval);
+        pumpTimerInterval = null;
+    }
+    updatePumpTimerDisplay();
+    if (appState.pumpTimerEndsAt && appState.pumpTimerEndsAt > Date.now()) {
+        pumpTimerInterval = setInterval(updatePumpTimerDisplay, 1000);
+    }
+}
+
+function cancelPumpTimer(message = 'Timer is off.') {
+    appState.pumpTimerEndsAt = null;
+    saveAppState();
+    if (pumpTimerInterval) {
+        clearInterval(pumpTimerInterval);
+        pumpTimerInterval = null;
+    }
+    if (pumpTimerStatus) pumpTimerStatus.innerText = message;
+}
+
+function updatePumpTimerDisplay() {
+    if (!pumpTimerStatus) return;
+    if (!appState.pumpTimerEndsAt) {
+        pumpTimerStatus.innerText = 'Timer is off.';
+        return;
+    }
+
+    const remaining = appState.pumpTimerEndsAt - Date.now();
+    if (remaining <= 0) {
+        cancelPumpTimer('Timer complete. Stopping pump...');
+        executePumpCmd('stop');
+        showFarmAlert('Auto stop timer finished. Pump stop request sent.', 'success', 'fa-stopwatch');
+        return;
+    }
+
+    const minutes = Math.floor(remaining / 60000);
+    const seconds = Math.floor((remaining % 60000) / 1000);
+    pumpTimerStatus.innerText = `Stops in ${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 function updatePumpUI(status) {
     const badge = document.getElementById('pumpBadge');
     const flow = document.getElementById('connFlow');
@@ -2150,6 +2420,23 @@ function updatePumpUI(status) {
     btnStop.disabled = status !== 'on';
     flow.classList.toggle('active', status === 'on');
     circle.classList.toggle('active', status === 'on');
+
+    // Update bottom navigation Pump button state and icons
+    const pumpNavItem = document.querySelector('.bottom-nav-item.nav-primary');
+    if (pumpNavItem) {
+        const icon = pumpNavItem.querySelector('i');
+        if (status === 'on') {
+            pumpNavItem.classList.add('pump-running');
+            if (icon) {
+                icon.className = 'fa-solid fa-faucet-drip';
+            }
+        } else {
+            pumpNavItem.classList.remove('pump-running');
+            if (icon) {
+                icon.className = 'fa-solid fa-faucet';
+            }
+        }
+    }
 
     if (status === 'on') {
         badge.className = 'pump-status-badge online';

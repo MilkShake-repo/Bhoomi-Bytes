@@ -1,15 +1,15 @@
 const appConfig = {
     languages: [
         { code: 'en', label: 'English' },
-        { code: 'hi', label: 'Hindi' },
-        { code: 'bn', label: 'Bengali' },
-        { code: 'te', label: 'Telugu' },
-        { code: 'mr', label: 'Marathi' },
-        { code: 'ta', label: 'Tamil' },
-        { code: 'gu', label: 'Gujarati' },
-        { code: 'ur', label: 'Urdu' },
-        { code: 'pa', label: 'Punjabi' },
-        { code: 'as', label: 'Assamese' }
+        { code: 'hi', label: '\u0939\u093f\u0928\u094d\u0926\u0940' },
+        { code: 'bn', label: '\u09ac\u09be\u0982\u09b2\u09be' },
+        { code: 'te', label: '\u0c24\u0c46\u0c32\u0c41\u0c17\u0c41' },
+        { code: 'mr', label: '\u092e\u0930\u093e\u0920\u0940' },
+        { code: 'ta', label: '\u0ba4\u0bae\u0bbf\u0bb4\u0bcd' },
+        { code: 'gu', label: '\u0a97\u0ac1\u0a9c\u0ab0\u0abe\u0aa4\u0ac0' },
+        { code: 'ur', label: '\u0627\u0631\u062f\u0648' },
+        { code: 'pa', label: '\u0a2a\u0a70\u0a1c\u0a3e\u0a2c\u0a40' },
+        { code: 'as', label: '\u0985\u09b8\u09ae\u09c0\u09af\u09bc\u09be' }
     ],
 
     sensors: [
@@ -22,8 +22,8 @@ const appConfig = {
             decimals: 0,
             icon: 'fa-water',
             chartCanvasId: 'chartMoisture',
-            chartColor: '#339af0',
-            chartFill: 'rgba(51, 154, 240, 0.4)',
+            chartColor: '#0ea5e9',
+            chartFill: 'rgba(14, 165, 233, 0.22)',
             idealRangeKey: 'moistureIdeal'
         },
         {
@@ -35,8 +35,8 @@ const appConfig = {
             decimals: 1,
             icon: 'fa-temperature-high',
             chartCanvasId: 'chartTemp',
-            chartColor: '#ff8787',
-            chartFill: 'rgba(255, 135, 135, 0.4)',
+            chartColor: '#ef4444',
+            chartFill: 'rgba(239, 68, 68, 0.18)',
             idealRangeKey: 'tempIdeal'
         },
         {
@@ -48,8 +48,8 @@ const appConfig = {
             decimals: 1,
             icon: 'fa-cloud',
             chartCanvasId: 'chartHumidity',
-            chartColor: '#51cf66',
-            chartFill: 'rgba(81, 207, 102, 0.4)',
+            chartColor: '#22c55e',
+            chartFill: 'rgba(34, 197, 94, 0.18)',
             idealRange: [40, 80]
         },
         {
@@ -61,8 +61,8 @@ const appConfig = {
             decimals: 1,
             icon: 'fa-flask',
             chartCanvasId: 'chartPh',
-            chartColor: '#845ef7',
-            chartFill: 'rgba(132, 94, 247, 0.4)',
+            chartColor: '#8b5cf6',
+            chartFill: 'rgba(139, 92, 246, 0.16)',
             idealRangeKey: 'phIdeal'
         },
         {
@@ -74,8 +74,8 @@ const appConfig = {
             decimals: 0,
             icon: 'fa-seedling',
             chartCanvasId: 'chartTds',
-            chartColor: '#f06595',
-            chartFill: 'rgba(240, 101, 149, 0.4)',
+            chartColor: '#f97316',
+            chartFill: 'rgba(249, 115, 22, 0.16)',
             idealRangeKey: 'tdsIdeal'
         }
     ],
@@ -134,6 +134,24 @@ const appConfig = {
             phIdeal: [4.5, 5.5],
             tdsIdeal: [300, 500],
             irrigationRules: { criticalMoisture: 55, stopMoisture: 70 }
+        },
+        wheat: {
+            name: 'Wheat',
+            waterDemand: 'Moderate',
+            moistureIdeal: [50, 65],
+            tempIdeal: [10, 25],
+            phIdeal: [6.0, 7.5],
+            tdsIdeal: [400, 600],
+            irrigationRules: { criticalMoisture: 45, stopMoisture: 60 }
+        },
+        fruits: {
+            name: 'Fruits',
+            waterDemand: 'Moderate to High',
+            moistureIdeal: [55, 75],
+            tempIdeal: [18, 32],
+            phIdeal: [5.8, 7.0],
+            tdsIdeal: [450, 750],
+            irrigationRules: { criticalMoisture: 50, stopMoisture: 72 }
         },
         other: {
             name: 'General Crop',

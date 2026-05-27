@@ -224,7 +224,9 @@
                             <option value="potato" data-i18n="crop_potato">Potato</option>
                             <option value="vegetables" data-i18n="crop_vegetables">Vegetables</option>
                             <option value="gehunu" data-i18n="crop_gehunu">Gehunu (Wheat)</option>
+                            <option value="wheat">Wheat</option>
                             <option value="tea" data-i18n="crop_tea">Tea</option>
+                            <option value="fruits">Fruits</option>
                             <option value="other" data-i18n="crop_other">Other</option>
                         </select>
                     </label>
@@ -291,7 +293,9 @@
                             <option value="potato" data-i18n="crop_potato">Potato</option>
                             <option value="vegetables" data-i18n="crop_vegetables">Vegetables</option>
                             <option value="gehunu" data-i18n="crop_gehunu">Gehunu (Wheat)</option>
+                            <option value="wheat">Wheat</option>
                             <option value="tea" data-i18n="crop_tea">Tea</option>
+                            <option value="fruits">Fruits</option>
                             <option value="other" data-i18n="crop_other">Other</option>
                         </select>
                     </label>
@@ -377,7 +381,9 @@
                                 <option value="potato" data-i18n="crop_potato">Potato</option>
                                 <option value="vegetables" data-i18n="crop_vegetables">Vegetables</option>
                                 <option value="gehunu" data-i18n="crop_gehunu">Gehunu (Wheat)</option>
+                                <option value="wheat">Wheat</option>
                                 <option value="tea" data-i18n="crop_tea">Tea</option>
+                                <option value="fruits">Fruits</option>
                                 <option value="other" data-i18n="crop_other">Other</option>
                             </select>
                         </div>
@@ -397,10 +403,10 @@
         <main class="view" id="dashboard-view">
             <div class="dashboard-grid">
                 
-                <!-- Profile / Status Summary -->
-                <div class="card-panel profile-panel">
+                <!-- Settings Summary -->
+                <section class="card-panel profile-panel settings-summary-panel dashboard-section" data-section="home">
                     <div class="panel-header">
-                        <h3 data-i18n="panel_system_status">System Status</h3>
+                        <h3>Settings</h3>
                         <div class="panel-actions">
                             <button type="button" class="icon-btn panel-settings-btn" id="farmSettingsBtn" title="Farm Settings" aria-label="Farm Settings">
                                 <i class="fa-solid fa-gear"></i>
@@ -412,58 +418,75 @@
                     </div>
                     <div class="profile-info">
                         <div class="info-item">
-                            <span class="label" data-i18n="info_operator">Farmer:</span>
+                            <span class="label">Operator:</span>
                             <span class="value" id="dispName" style="color:var(--primary)"></span>
                         </div>
                         <div class="info-item">
-                            <span class="label" data-i18n="info_sector">Land Size:</span>
+                            <span class="label">Sector Size:</span>
                             <span class="value" id="dispSize" style="color:var(--accent-blue)"></span>
                         </div>
                         <div class="info-item">
-                            <span class="label" data-i18n="info_crop">Growing:</span>
+                            <span class="label">Active Crop:</span>
                             <span class="value" id="dispCrop" style="color:var(--secondary)"></span>
                         </div>
                         <div class="info-item">
-                            <span class="label" data-i18n="info_water_used">Water Used:</span>
+                            <span class="label">Water Used:</span>
                             <span class="value" style="color:var(--accent-blue)"><span id="dispWater">--</span> L</span>
                         </div>
                         <div class="info-item">
-                            <span class="label" data-i18n="info_energy_used">Energy Used:</span>
+                            <span class="label">Energy Used:</span>
                             <span class="value" style="color:var(--warning)"><span id="dispEnergy">--</span> kWh</span>
                         </div>
                         <div class="info-item">
-                            <span class="label" data-i18n="info_device_uid">Device ID:</span>
+                            <span class="label">Device ID:</span>
                             <span class="value uid-value" id="dispFirebaseUid">--</span>
                         </div>
                     </div>
-                </div>
+                </section>
 
                 <!-- Weather Panel (Extended with Forecast) -->
-                <div class="card-panel weather-panel grid-span-2">
-                    <div class="panel-header">
-                        <h3 data-i18n="panel_weather">Weather Station</h3>
-                        <i class="fa-solid fa-sun" style="font-size:1.5rem; color:#fff;"></i>
-                    </div>
-                    
-                    <div class="weather-main">
-                        <i class="fa-solid fa-cloud-sun weather-icon-main" id="wMainIcon"></i>
-                        <div class="w-temp-box">
-                            <div class="w-temp"><span id="wTemp">--</span>°C</div>
-                            <div class="w-desc" id="wDesc">Loading...</div>
-                            <div style="font-size: 0.85rem; font-weight: 700; opacity: 0.8; margin-top: 5px;">
-                                <i class="fa-solid fa-location-dot"></i> <span id="wLocation">Fetching location...</span>
-                            </div>
+                <section class="card-panel weather-panel grid-span-2 dashboard-section" data-section="home">
+                    <div class="weather-top-bar">
+                        <!-- Search Location toggler on left -->
+                        <button type="button" class="weather-action-btn" id="weatherEditBtn" aria-label="Search location" title="Search location">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                        </button>
+                        
+                        <!-- Center Location and Condition -->
+                        <div class="weather-location-center">
+                            <h3 id="wLocation">New Delhi, India (Default)</h3>
+                            <div class="w-desc-top" id="wDesc">Loading...</div>
                         </div>
+                        
+                        <!-- Auto-location toggler on right -->
+                        <button type="button" class="weather-action-btn" id="weatherAutoBtn" aria-label="Auto detect location" title="Auto detect location">
+                            <i class="fa-solid fa-location-dot"></i>
+                        </button>
+                    </div>
+
+                    <form class="weather-search" id="weatherSearchForm" hidden>
+                        <div class="weather-search-row">
+                            <input type="text" id="weatherLocationInput" placeholder="Search city or village">
+                            <button type="submit" class="btn-secondary compact-btn">
+                                <i class="fa-solid fa-magnifying-glass"></i> Search
+                            </button>
+                        </div>
+                        <p id="weatherSearchStatus" class="weather-search-status"></p>
+                    </form>
+                    
+                    <div class="weather-main-centered">
+                        <i class="fa-solid fa-cloud-sun weather-icon-huge" id="wMainIcon"></i>
+                        <div class="w-temp-huge"><span id="wTemp">--</span>°</div>
                     </div>
                     
-                    <div class="weather-details">
+                    <div class="weather-details-glass">
                         <div class="w-detail">
                             <i class="fa-solid fa-droplet"></i>
-                            <span><span id="wRain">0</span>mm Rain</span>
+                            <span><span id="wRain">0</span>% Precip</span>
                         </div>
                         <div class="w-detail">
                             <i class="fa-solid fa-wind"></i>
-                            <span><span id="wWind">0</span> km/h</span>
+                            <span><span id="wWind">0</span> km/h Wind</span>
                         </div>
                         <div class="w-detail">
                             <i class="fa-solid fa-temperature-half"></i>
@@ -472,15 +495,15 @@
                     </div>
                     
                     <!-- 7 Day Forecast -->
-                    <h4 style="margin-top: 1.5rem; color: #03045e;">Upcoming Forecast</h4>
+                    <h4 class="weather-forecast-title">Upcoming Forecast</h4>
                     <div class="forecast-container" id="forecastContainer">
                         <!-- Populated by JS -->
                         <div class="forecast-day"><span>Loading...</span></div>
                     </div>
-                </div>
+                </section>
 
                 <!-- AI Recommendations -->
-                <div class="card-panel ai-panel">
+                <section class="card-panel ai-panel dashboard-section" data-section="ai">
                     <div class="panel-header">
                         <h3 data-i18n="panel_ai_analysis">Smart Analysis</h3>
                     </div>
@@ -511,10 +534,10 @@
                         <h4 data-i18n="ai_action_req">Tip of the Day:</h4>
                         <p id="aiRecText" data-i18n="ai_rec_normal">Keep smiling! Your farm is looking great today.</p>
                     </div>
-                </div>
+                </section>
 
                 <!-- Sensors Grid -->
-                <div class="grid-span-full">
+                <section class="grid-span-full dashboard-section" data-section="field">
                     <h3 class="section-title"><i class="fa-solid fa-leaf"></i> <span>Live Field Sensors</span></h3>
                     <div class="sensor-cards">
                         
@@ -599,10 +622,22 @@
                         </div>
 
                     </div>
-                </div>
+                </section>
+
+                <!-- Live Field Graph Analysis -->
+                <section class="card-panel live-graph-panel grid-span-full dashboard-section" data-section="analysis">
+                    <div class="panel-header">
+                        <div>
+                            <h3><i class="fa-solid fa-chart-line"></i> Live Field Graph</h3>
+                            <p class="helper-text">Realtime Firebase sensor values, refreshed as field data arrives.</p>
+                        </div>
+                        <span class="crop-chip">Crop: <strong id="activeCropChip">--</strong></span>
+                    </div>
+                    <div class="chart-container live"><canvas id="chartLiveSensors"></canvas></div>
+                </section>
 
                 <!-- Crop Settings -->
-                <div class="card-panel crop-settings-panel grid-span-full">
+                <section class="card-panel crop-settings-panel grid-span-full dashboard-section" data-section="settings">
                     <div class="panel-header">
                         <h3><i class="fa-solid fa-sliders"></i> Crop Default Values</h3>
                         <button type="button" class="btn-secondary compact-btn" id="resetCropDefaultsBtn">
@@ -655,10 +690,10 @@
                             <i class="fa-solid fa-floppy-disk"></i> Save Values
                         </button>
                     </form>
-                </div>
+                </section>
 
                 <!-- Pump Control Panel -->
-                <div class="card-panel pump-panel grid-span-full">
+                <section class="card-panel pump-panel grid-span-full dashboard-section" data-section="pump">
                     <div class="panel-header">
                         <h3 data-i18n="panel_pump_control">Irrigation Pump Control</h3>
                         <div class="pump-status-badge offline" id="pumpBadge">
@@ -701,6 +736,23 @@
                                     <span>Farm monitor is ready. Sensor readings will appear automatically.</span>
                                 </div>
                             </div>
+
+                            <div class="pump-timer-card">
+                                <div>
+                                    <h4><i class="fa-solid fa-clock"></i> Auto Stop Timer</h4>
+                                    <p id="pumpTimerStatus">Timer is off.</p>
+                                </div>
+                                <div class="pump-timer-controls">
+                                    <input type="number" id="pumpTimerMinutes" min="1" max="180" value="15" aria-label="Pump timer minutes">
+                                    <span>min</span>
+                                    <button type="button" class="btn-secondary compact-btn" id="btnSetPumpTimer">
+                                        <i class="fa-solid fa-hourglass-start"></i> Set
+                                    </button>
+                                    <button type="button" class="icon-btn" id="btnCancelPumpTimer" title="Cancel timer" aria-label="Cancel pump timer">
+                                        <i class="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+                            </div>
                             
                             <div class="action-buttons">
                                 <button class="btn-pump btn-start" id="btnStartPump">
@@ -712,11 +764,37 @@
                             </div>
                         </div>
                     </div>
-                </div>
+                </section>
 
             </div>
         </main>
     </div>
+    <nav class="bottom-nav" id="bottomNav" aria-label="Primary sections">
+        <button type="button" class="bottom-nav-item active" data-target-section="home">
+            <i class="fa-solid fa-house"></i>
+            <span>Home</span>
+        </button>
+        <button type="button" class="bottom-nav-item" data-target-section="field">
+            <i class="fa-solid fa-leaf"></i>
+            <span>Field</span>
+        </button>
+        <button type="button" class="bottom-nav-item nav-primary" data-target-section="pump">
+            <i class="fa-solid fa-faucet"></i>
+            <span>Pump</span>
+        </button>
+        <button type="button" class="bottom-nav-item" data-target-section="ai">
+            <i class="fa-solid fa-brain"></i>
+            <span>AI Rec</span>
+        </button>
+        <button type="button" class="bottom-nav-item" data-target-section="analysis">
+            <i class="fa-solid fa-chart-line"></i>
+            <span>Graph</span>
+        </button>
+        <button type="button" class="bottom-nav-item" data-target-section="settings">
+            <i class="fa-solid fa-gear"></i>
+            <span>Setup</span>
+        </button>
+    </nav>
     <script src="js/config.js"></script>
     <script src="js/i18n.js"></script>
     <script src="js/data.js"></script>
