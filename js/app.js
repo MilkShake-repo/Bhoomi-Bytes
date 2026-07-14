@@ -3,13 +3,13 @@
 // ==========================================
 // ADD YOUR FIREBASE CONFIG HERE
 const firebaseConfig = {
-    apiKey: "AIzaSyB-I2MqvcDyAgV24KVukTWAF3dMqvZQCmc",
-    authDomain: "bhoomi-bytes-2d514.firebaseapp.com",
-    databaseURL: "https://bhoomi-bytes-2d514-default-rtdb.firebaseio.com",
-    projectId: "bhoomi-bytes-2d514",
-    storageBucket: "bhoomi-bytes-2d514.firebasestorage.app",
-    messagingSenderId: "402293534114",
-    appId: "1:402293534114:web:86d263b66f314a7254d6fb"
+    apiKey: "Your Api(firebase)",
+    authDomain: "",
+    databaseURL: "",
+    projectId: "",
+    storageBucket: "",
+    messagingSenderId: "",
+    appId: ""
 };
 
 // Initialize Firebase
